@@ -1,0 +1,55 @@
+[project]
+name = "instantimpact"
+version = "0.1.0"
+description = "Local AI Persona Content Studio"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "sqlalchemy[asyncio]>=2.0.36",
+  "aiosqlite>=0.20.0",
+  "pydantic>=2.9.0",
+  "pydantic-settings>=2.6.0",
+  "python-multipart>=0.0.12",
+  "httpx>=0.27.0",
+  "redis>=5.2.0",
+  "arq>=0.26.0",
+  "pillow>=10.4.0",
+  "python-slugify>=8.0.4",
+  "orjson>=3.10.0",
+  "websockets>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.24.0",
+  "ruff>=0.7.0",
+  "httpx>=0.27.0",
+]
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = [
+  "instantimpact_common",
+  "instantimpact_comfy",
+  "instantimpact_prompts",
+]
+
+[tool.setuptools.package-dir]
+instantimpact_common = "packages/common/instantimpact_common"
+instantimpact_comfy = "packages/comfy_client/instantimpact_comfy"
+instantimpact_prompts = "packages/prompt_engine/instantimpact_prompts"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["packages/common", "packages/comfy_client", "packages/prompt_engine", "apps/api", "apps/worker"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
