@@ -203,13 +203,20 @@ async def _enqueue(
     await db.commit()
     job = await get_job(db, job.id)
 
-    # Best-effort Redis enqueue; fall back to in-process mock runner
-    try:
-        await _try_arq_enqueue(job.id, str(request_path), job_type)
-    except Exception:
-        # Synchronous mock completion when Redis/worker unavailable
-        if snapshot.mock:
-            await run_mock_job(db, job.id)
+    # Mock: API is the sole SQLite writer and materializes placeholder stills here.
+    # (Worker mock only emits Redis progress events; it does not write assets.)
+    # Real Comfy jobs: enqueue to ARQ for the GPU worker.
+    if snapshot.mock:
+        await run_mock_job(db, job.id)
+    else:
+        try:
+            await _try_arq_enqueue(job.id, str(request_path), job_type)
+        except Exception as e:
+            job = await get_job(db, job.id)
+            job.status = JobStatus.FAILED
+            job.error_message = f"Failed to enqueue job: {e}"
+            job.finished_at = datetime.now(timezone.utc)
+            await db.commit()
 
     return await get_job(db, job.id)
 
