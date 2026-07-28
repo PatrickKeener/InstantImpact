@@ -70,9 +70,14 @@ start_bg() {
   fi
 
   echo "  → starting ${name}"
-  nohup "$@" >>"$logfile" 2>&1 &
+  # setsid: detach from SSH TTY so closing the terminal does not kill children
+  if command -v setsid >/dev/null 2>&1; then
+    setsid nohup "$@" >>"$logfile" 2>&1 < /dev/null &
+  else
+    nohup "$@" >>"$logfile" 2>&1 < /dev/null &
+  fi
   echo $! >"$pidfile"
-  sleep 0.3
+  sleep 0.5
   if kill -0 "$(cat "$pidfile")" 2>/dev/null; then
     echo "    pid $(cat "$pidfile")  log ${logfile}"
   else
@@ -93,15 +98,15 @@ stop_name() {
   pid="$(cat "$pidfile")"
   if kill -0 "$pid" 2>/dev/null; then
     echo "  → stopping ${name} (pid ${pid})"
-    kill "$pid" 2>/dev/null || true
-    # graceful wait
+    # Kill process group if possible (worker children)
+    kill -- "-${pid}" 2>/dev/null || kill "$pid" 2>/dev/null || true
     for _ in 1 2 3 4 5 6 7 8 9 10; do
       kill -0 "$pid" 2>/dev/null || break
       sleep 0.3
     done
     if kill -0 "$pid" 2>/dev/null; then
       echo "    force kill ${name}"
-      kill -9 "$pid" 2>/dev/null || true
+      kill -9 -- "-${pid}" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
     fi
   else
     echo "  · ${name} not running (stale pidfile)"

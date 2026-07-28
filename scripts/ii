@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# InstantImpact one-terminal control (Linux / nemesis)
+#
+# Usage (from repo root OR any cwd):
+#   bash scripts/ii start              # API + worker + web + Comfy (background)
+#   bash scripts/ii start --mock       # no Comfy, mock stills
+#   bash scripts/ii start --stop-vllm  # free GPU from docker vllm first
+#   bash scripts/ii stop               # stop everything we started (+ ports)
+#   bash scripts/ii status
+#   bash scripts/ii logs               # tail all logs (Ctrl+C to exit)
+#   bash scripts/ii logs worker        # tail one service
+#   bash scripts/ii restart
+#
+# Processes run in the background (nohup). You only need ONE terminal.
+# Logs:  .run/logs/    PIDs: .run/pids/
+#
+set -euo pipefail
+
+II_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NEMESIS="${II_ROOT}/scripts/nemesis"
+
+# Always runnable even without +x
+run_nemesis() {
+  local script="$1"
+  shift
+  bash "${NEMESIS}/${script}" "$@"
+}
+
+usage() {
+  sed -n '2,16p' "$0"
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  start|up)
+    # Default: real gen stack with Comfy. Pass --mock to skip Comfy.
+    extra=()
+    has_mock=0
+    has_comfy=0
+    for a in "$@"; do
+      case "$a" in
+        --mock) has_mock=1 ;;
+        --with-comfy) has_comfy=1 ;;
+      esac
+      extra+=("$a")
+    done
+    if [[ "$has_mock" -eq 0 && "$has_comfy" -eq 0 ]]; then
+      extra=(--with-comfy "${extra[@]}")
+    fi
+    run_nemesis up.sh "${extra[@]}"
+    echo ""
+    echo "All services are running in the background. You can close this SSH session."
+    echo "  stop:   bash scripts/ii stop"
+    echo "  status: bash scripts/ii status"
+    echo "  logs:   bash scripts/ii logs"
+    ;;
+
+  stop|down)
+    # Default: stop app + comfy we started + free our ports
+    if [[ $# -eq 0 ]]; then
+      run_nemesis down.sh --all
+    else
+      run_nemesis down.sh "$@"
+    fi
+    # Also clear common ports if orphans remain (manual starts)
+    bash "${NEMESIS}/kill-ports.sh" 2>/dev/null || true
+    ;;
+
+  status)
+    run_nemesis status.sh
+    ;;
+
+  logs|log)
+    svc="${1:-all}"
+    LOG_DIR="${II_ROOT}/.run/logs"
+    if [[ ! -d "$LOG_DIR" ]]; then
+      echo "No logs yet (start the stack first)."
+      exit 1
+    fi
+    if [[ "$svc" == "all" ]]; then
+      echo "Tailing ${LOG_DIR}/*.log  (Ctrl+C to stop tailing — services keep running)"
+      # shellcheck disable=SC2086
+      tail -n 50 -f ${LOG_DIR}/*.log
+    else
+      f="${LOG_DIR}/${svc}.log"
+      if [[ ! -f "$f" ]]; then
+        echo "No log: $f"
+        echo "Available:"
+        ls -1 "$LOG_DIR" 2>/dev/null || true
+        exit 1
+      fi
+      echo "Tailing $f  (Ctrl+C stops tail only)"
+      tail -n 80 -f "$f"
+    fi
+    ;;
+
+  restart)
+    bash "$0" stop
+    sleep 1
+    bash "$0" start "$@"
+    ;;
+
+  -h|--help|help|"")
+    usage
+    ;;
+
+  *)
+    echo "Unknown command: $cmd"
+    usage
+    exit 1
+    ;;
+esac

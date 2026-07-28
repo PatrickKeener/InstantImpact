@@ -1,36 +1,37 @@
 # Nemesis start / stop
 
-Easy bring-up and teardown for InstantImpact on **nemesis** (Linux).  
-Reuses your existing `.venv`, `data/`, and optional host **ComfyUI** — no need to rebuild models.
+**One terminal** — everything runs in the background (nohup). You do not need six SSH sessions.
 
-## One-liners
+## Recommended: `scripts/ii`
 
 ```bash
 cd ~/InstantImpact
 
-# Start app (API + worker + web). Starts docker redis if nothing on 6379.
-./scripts/nemesis/up.sh
+# Start API + worker + web + Comfy (all background)
+bash scripts/ii start
 
-# Start app + ComfyUI from ~/ComfyUI
-./scripts/nemesis/up.sh --with-comfy
+# Free GPU first (stop docker vllm)
+bash scripts/ii start --stop-vllm
 
-# Free GPU for Flux (stops docker container named vllm)
-./scripts/nemesis/up.sh --with-comfy --stop-vllm
+# Mock only (no Comfy)
+bash scripts/ii start --mock
 
-# Mock only (no Comfy needed)
-./scripts/nemesis/up.sh --mock
-
-# Status
-./scripts/nemesis/status.sh
-
-# Stop InstantImpact processes
-./scripts/nemesis/down.sh
-
-# Stop app + Comfy we started + our docker redis
-./scripts/nemesis/down.sh --all
+bash scripts/ii status
+bash scripts/ii logs              # Ctrl+C only stops the tail
+bash scripts/ii logs worker
+bash scripts/ii stop              # stop everything
+bash scripts/ii restart
 ```
 
-First time: `chmod +x scripts/nemesis/*.sh`
+You can disconnect SSH after `start`; services keep running.
+
+## Lower-level scripts
+
+```bash
+bash scripts/nemesis/up.sh --with-comfy --stop-vllm
+bash scripts/nemesis/down.sh --all
+bash scripts/nemesis/status.sh
+```
 
 ## What starts / stops
 
