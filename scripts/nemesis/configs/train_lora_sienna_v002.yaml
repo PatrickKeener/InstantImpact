@@ -1,0 +1,77 @@
+---
+# Ostris AI Toolkit — Flux LoRA for InstantImpact character "Sienna" (v002)
+#
+# Install toolkit (once), then from ai-toolkit repo:
+#   source venv/bin/activate
+#   hf auth login   # accept FLUX.1-dev license on Hugging Face
+#   python run.py /home/pkeener/InstantImpact/scripts/nemesis/configs/train_lora_sienna_v002.yaml
+#
+# Or copy this file into ai-toolkit/config/ and:
+#   python run.py config/train_lora_sienna_v002.yaml
+#
+# Free GPU first: docker stop vllm ; stop InstantImpact worker/Comfy if needed
+#
+job: extension
+config:
+  name: "ii_sienna_v002"
+  process:
+    - type: "sd_trainer"
+      training_folder: "/home/pkeener/InstantImpact/data/characters/7418d075-fc10-48b2-9723-c02d31b0d425/versions/v002/lora/toolkit_output"
+      device: cuda:0
+      trigger_word: "sks_sienna_v1"
+      network:
+        type: "lora"
+        linear: 16
+        linear_alpha: 16
+      save:
+        dtype: float16
+        save_every: 250
+        max_step_saves_to_keep: 4
+        push_to_hub: false
+      datasets:
+        - folder_path: "/home/pkeener/InstantImpact/data/characters/7418d075-fc10-48b2-9723-c02d31b0d425/versions/v002/dataset"
+          caption_ext: "txt"
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [512, 768, 1024]
+      train:
+        batch_size: 1
+        steps: 1500
+        gradient_accumulation_steps: 1
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: "flowmatch"
+        optimizer: "adamw8bit"
+        lr: 1e-4
+        ema_config:
+          use_ema: true
+          ema_decay: 0.99
+        dtype: bf16
+      model:
+        name_or_path: "black-forest-labs/FLUX.1-dev"
+        is_flux: true
+        quantize: true
+        # L40S 48GB has headroom; uncomment if you OOM while other things use VRAM:
+        # low_vram: true
+      sample:
+        sampler: "flowmatch"
+        sample_every: 250
+        sample_start_step: 0
+        width: 1024
+        height: 1280
+        prompts:
+          - "[trigger], photorealistic portrait of an adult woman, mid-20s, natural window light, 85mm photo"
+          - "[trigger], adult woman casual bedroom, oversized tee, soft daylight, lifestyle photograph"
+          - "[trigger], adult woman looking at camera, natural skin texture, professional photography"
+        neg: ""
+        seed: 42
+        walk_seed: true
+        guidance_scale: 4
+        sample_steps: 20
+meta:
+  name: "[name]"
+  version: "1.0"
+  character_id: "7418d075-fc10-48b2-9723-c02d31b0d425"
+  instantimpact_trigger: "sks_sienna_v1"
