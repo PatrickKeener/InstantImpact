@@ -1,0 +1,23 @@
+FROM node:20-bookworm-slim AS build
+
+WORKDIR /web
+COPY apps/web/package.json apps/web/package-lock.json* ./
+RUN npm install
+COPY apps/web/ ./
+
+# Dev proxy target is compile-time for Vite only when using import.meta;
+# runtime preview still needs API on host — we use vite preview + proxy via env at start.
+ARG VITE_API_PROXY=http://127.0.0.1:8001
+ENV VITE_API_PROXY=$VITE_API_PROXY
+RUN npm run build
+
+FROM node:20-bookworm-slim
+WORKDIR /web
+COPY --from=build /web /web
+ENV HOST=0.0.0.0
+ENV PORT=5173
+EXPOSE 5173
+# Serve built assets; API calls go to same-origin /api if you put a reverse proxy in front.
+# For LAN MVP, point browser at host API via VITE build proxy is not used in preview —
+# use scripts/nemesis for dev proxy, or set public API URL later.
+CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "5173"]

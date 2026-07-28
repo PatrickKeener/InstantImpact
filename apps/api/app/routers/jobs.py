@@ -6,7 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.session import get_db
 from app.schemas.jobs import (
+    AssetBulkDeleteRequest,
+    AssetBulkDeleteResponse,
     AssetDecisionRequest,
+    AssetDeleteResponse,
     AssetOut,
     GpuStatusOut,
     JobOut,
@@ -77,6 +80,46 @@ async def asset_decision(
     try:
         return await svc.set_asset_decision(
             db, asset_id, payload.decision, score=payload.score, notes=payload.notes
+        )
+    except svc.JobServiceError as e:
+        raise _err(e) from e
+
+
+@router.delete("/assets/{asset_id}", response_model=AssetDeleteResponse)
+async def delete_asset(
+    asset_id: str,
+    delete_files: bool = True,
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently delete an asset from the library (DB + optional files under data/)."""
+    try:
+        return await svc.delete_asset(db, asset_id, delete_files=delete_files)
+    except svc.JobServiceError as e:
+        raise _err(e) from e
+
+
+@router.post(
+    "/characters/{character_id}/assets/delete",
+    response_model=AssetBulkDeleteResponse,
+)
+async def bulk_delete_assets(
+    character_id: str,
+    payload: AssetBulkDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk delete assets by id list and/or decision filter (e.g. all rejected)."""
+    if not payload.asset_ids and not payload.decision:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide asset_ids and/or decision filter",
+        )
+    try:
+        return await svc.delete_assets_bulk(
+            db,
+            character_id=character_id,
+            asset_ids=payload.asset_ids,
+            decision=payload.decision,
+            delete_files=payload.delete_files,
         )
     except svc.JobServiceError as e:
         raise _err(e) from e

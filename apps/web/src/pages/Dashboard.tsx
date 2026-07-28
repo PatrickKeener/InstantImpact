@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, Character } from "../api";
 
 export default function Dashboard() {
+  const nav = useNavigate();
   const [health, setHealth] = useState<Record<string, unknown> | null>(null);
   const [chars, setChars] = useState<Character[]>([]);
   const [gpu, setGpu] = useState<string>("…");
   const [error, setError] = useState<string | null>(null);
+  const [busyRandom, setBusyRandom] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -69,6 +71,22 @@ export default function Dashboard() {
         <Link to="/characters/new" className="btn-primary">
           Create character
         </Link>
+        <button
+          type="button"
+          className="btn-ghost"
+          disabled={busyRandom}
+          onClick={() => {
+            setBusyRandom(true);
+            setError(null);
+            api
+              .createRandomCharacter({ auto_attest: true, auto_bootstrap: true })
+              .then((c) => nav(`/characters/${c.id}`))
+              .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+              .finally(() => setBusyRandom(false));
+          }}
+        >
+          {busyRandom ? "Rolling…" : "Random character"}
+        </button>
         <Link to="/characters" className="btn-ghost">
           Manage library
         </Link>

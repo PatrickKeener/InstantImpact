@@ -27,6 +27,20 @@ chamber (`10.10.30.184`) is fine as a **browser only** — open the nemesis UI f
 
 See [`docs/deployment.md`](docs/deployment.md).
 
+### Easy start / stop (Linux / nemesis)
+
+```bash
+cd ~/InstantImpact
+chmod +x scripts/nemesis/*.sh
+
+./scripts/nemesis/up.sh --with-comfy --stop-vllm   # full real-gen stack
+./scripts/nemesis/status.sh
+./scripts/nemesis/down.sh --all                    # tear down when done
+```
+
+Details: [`scripts/nemesis/README.md`](scripts/nemesis/README.md).  
+Optional Docker (app only, Comfy on host): `docker compose up -d` / `docker compose down`.
+
 ## Quick start (on nemesis)
 
 ```powershell

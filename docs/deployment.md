@@ -1,5 +1,30 @@
 # Deployment
 
+## Easy start / stop (recommended day-to-day)
+
+On nemesis, after one-time setup (venv, `.env`, Comfy models):
+
+```bash
+cd ~/InstantImpact
+chmod +x scripts/nemesis/*.sh
+
+# Bring up API + worker + web (+ Comfy, free GPU from vLLM)
+./scripts/nemesis/up.sh --with-comfy --stop-vllm
+
+# Check
+./scripts/nemesis/status.sh
+
+# When finished — free RAM/GPU for other work
+./scripts/nemesis/down.sh --all
+# optional: docker start vllm
+```
+
+Logs: `.run/logs/`. See `scripts/nemesis/README.md`.
+
+Optional **Docker Compose** for API/worker/web/redis only (`docker compose up -d` / `down`). Comfy stays native on the host.
+
+---
+
 ## Recommended: all-in-one on **nemesis** (L40S)
 
 | Host | IP | Role |

@@ -97,6 +97,28 @@ class AssetDecisionRequest(BaseModel):
     notes: str | None = None
 
 
+class AssetDeleteResponse(BaseModel):
+    id: str
+    deleted: bool = True
+    character_id: str
+    files_removed: int = 0
+
+
+class AssetBulkDeleteRequest(BaseModel):
+    asset_ids: list[str] | None = None
+    decision: str | None = Field(
+        default=None,
+        description="If set (e.g. rejected), delete all assets with this decision",
+    )
+    delete_files: bool = True
+
+
+class AssetBulkDeleteResponse(BaseModel):
+    character_id: str
+    deleted: int
+    files_removed: int = 0
+
+
 class GpuStatusOut(BaseModel):
     locked: bool
     holder_job_id: str | None = None

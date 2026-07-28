@@ -1,0 +1,87 @@
+# Optional Docker stack for InstantImpact app services (not ComfyUI).
+#
+# ComfyUI stays on the host (models + GPU already set up at ~/ComfyUI).
+# Worker/API use host network so they can reach Comfy on 127.0.0.1:8188.
+#
+# Usage:
+#   cp .env.nemesis.example .env   # set API token
+#   docker compose up -d --build
+#   docker compose down
+#
+# Prefer scripts/nemesis/up.sh on a working native install — faster and reuses .venv.
+# This compose is for isolation / clean teardown of API+worker+web+redis only.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: instantimpact-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ii_redis:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: instantimpact-api
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      INSTANTIMPACT_HOST: "0.0.0.0"
+      INSTANTIMPACT_PORT: ${INSTANTIMPACT_PORT:-8001}
+      INSTANTIMPACT_REDIS_URL: redis://127.0.0.1:6379/0
+      INSTANTIMPACT_COMFY_URL: http://127.0.0.1:8188
+      INSTANTIMPACT_DATA_DIR: /app/data
+      INSTANTIMPACT_WORKFLOWS_DIR: /app/workflows
+    volumes:
+      - ./data:/app/data
+      - ./workflows:/app/workflows:ro
+    depends_on:
+      - redis
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: instantimpact-worker
+    restart: unless-stopped
+    network_mode: host
+    command: ["python", "-m", "worker.main"]
+    working_dir: /app/apps/worker
+    env_file:
+      - .env
+    environment:
+      INSTANTIMPACT_REDIS_URL: redis://127.0.0.1:6379/0
+      INSTANTIMPACT_COMFY_URL: http://127.0.0.1:8188
+      INSTANTIMPACT_COMFY_CKPT_NAME: ${INSTANTIMPACT_COMFY_CKPT_NAME:-flux1-dev-fp8.safetensors}
+      INSTANTIMPACT_DATA_DIR: /app/data
+      INSTANTIMPACT_WORKFLOWS_DIR: /app/workflows
+      PYTHONPATH: /app/apps/worker:/app/apps/api:/app/packages/common:/app/packages/comfy_client:/app/packages/prompt_engine
+    volumes:
+      - ./data:/app/data
+      - ./workflows:/app/workflows:ro
+    depends_on:
+      - redis
+      - api
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+      args:
+        VITE_API_PROXY: http://127.0.0.1:${INSTANTIMPACT_PORT:-8001}
+    container_name: instantimpact-web
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      # preview server; Dockerfile CMD uses host 0.0.0.0 port 5173
+      PORT: "5173"
+    depends_on:
+      - api
+
+volumes:
+  ii_redis:

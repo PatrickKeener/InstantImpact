@@ -39,6 +39,23 @@ class CharacterCreate(BaseModel):
         return v
 
 
+class RandomCharacterRequest(BaseModel):
+    """Options for POST /api/characters/random."""
+
+    seed: int | None = Field(
+        default=None,
+        description="Optional RNG seed for reproducible random personas",
+    )
+    auto_attest: bool = Field(
+        default=True,
+        description="Pre-check synthetic + not-real-person (required for generation)",
+    )
+    auto_bootstrap: bool = Field(
+        default=True,
+        description="Advance draft → bootstrap so seed gallery / stills are allowed",
+    )
+
+
 class CharacterUpdate(BaseModel):
     display_name: str | None = None
     age_appearance_min: int | None = Field(default=None, ge=21)

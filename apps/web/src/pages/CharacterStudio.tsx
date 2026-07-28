@@ -75,6 +75,46 @@ export default function CharacterStudio() {
     await refresh();
   }
 
+  async function removeAsset(assetId: string) {
+    if (!window.confirm("Permanently delete this image from the library and disk?")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteAsset(assetId, true);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteRejected() {
+    if (!id) return;
+    const n = assets.filter((a) => a.decision === "rejected").length;
+    if (!n) {
+      setError("No rejected images to delete.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Permanently delete ${n} rejected image(s) from the library and disk?`
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.bulkDeleteAssets(id, { decision: "rejected", delete_files: true });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!character) {
     return <div className="text-slate-400">{error || "Loading…"}</div>;
   }
@@ -205,7 +245,17 @@ export default function CharacterStudio() {
       </section>
 
       <section className="card p-5">
-        <h2 className="font-display text-xl">Outputs</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-display text-xl">Outputs</h2>
+          <button
+            type="button"
+            className="btn-ghost text-xs text-red-300/90 hover:text-red-200"
+            disabled={busy || !assets.some((a) => a.decision === "rejected")}
+            onClick={() => void deleteRejected()}
+          >
+            Delete all rejected
+          </button>
+        </div>
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
           {assets.map((a) => (
             <div key={a.id} className="overflow-hidden rounded-xl border border-white/10 bg-black/30">
@@ -222,16 +272,31 @@ export default function CharacterStudio() {
                 <div className="truncate text-[10px] text-slate-500">seed {a.seed ?? "—"}</div>
                 <div className="flex gap-1">
                   <button
+                    type="button"
                     className="btn-ghost flex-1 px-1 py-1 text-[10px]"
-                    onClick={() => decide(a.id, "approved")}
+                    disabled={busy}
+                    onClick={() => void decide(a.id, "approved")}
+                    title="Approve"
                   >
                     ✓
                   </button>
                   <button
+                    type="button"
                     className="btn-ghost flex-1 px-1 py-1 text-[10px]"
-                    onClick={() => decide(a.id, "rejected")}
+                    disabled={busy}
+                    onClick={() => void decide(a.id, "rejected")}
+                    title="Reject"
                   >
                     ✕
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost flex-1 px-1 py-1 text-[10px] text-red-300/90"
+                    disabled={busy}
+                    onClick={() => void removeAsset(a.id)}
+                    title="Delete permanently"
+                  >
+                    🗑
                   </button>
                 </div>
                 <div className="text-center text-[10px] capitalize text-slate-400">{a.decision}</div>

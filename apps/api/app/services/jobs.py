@@ -384,6 +384,108 @@ async def set_asset_decision(
     }
 
 
+def _safe_unlink_under_data(rel_path: str | None) -> bool:
+    """Delete a file under data/ if it exists. Returns True if a file was removed."""
+    if not rel_path:
+        return False
+    layout = get_layout()
+    root = layout.root.resolve()
+    rel = str(rel_path).replace("\\", "/").lstrip("/")
+    target = (root / rel).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return False
+    if target.is_file():
+        target.unlink()
+        return True
+    return False
+
+
+def _unlink_asset_files(path: str | None, thumb_path: str | None) -> int:
+    """Remove still, thumb, and disclosure sidecars under data/."""
+    removed = 0
+    for p in (path, thumb_path):
+        if _safe_unlink_under_data(p):
+            removed += 1
+    if path:
+        # still_000.png → still_000.disclosure.json (Path.with_suffix)
+        p = Path(str(path).replace("\\", "/"))
+        for cand in (str(p.with_suffix(".disclosure.json")), f"{path}.disclosure.json"):
+            if _safe_unlink_under_data(cand):
+                removed += 1
+    return removed
+
+
+async def delete_asset(db: AsyncSession, asset_id: str, *, delete_files: bool = True) -> dict:
+    """Permanently remove asset row, ratings, job_item link, and optional media files."""
+    from app.db.models import AssetRating
+
+    q = await db.execute(select(Asset).where(Asset.id == asset_id))
+    asset = q.scalar_one_or_none()
+    if not asset:
+        raise JobServiceError("Asset not found", 404)
+
+    character_id = asset.character_id
+    path = asset.path
+    thumb_path = asset.thumb_path
+
+    items = (
+        await db.execute(select(JobItem).where(JobItem.asset_id == asset_id))
+    ).scalars().all()
+    for item in items:
+        item.asset_id = None
+
+    ratings = (
+        await db.execute(select(AssetRating).where(AssetRating.asset_id == asset_id))
+    ).scalars().all()
+    for r in ratings:
+        await db.delete(r)
+
+    await db.delete(asset)
+    await db.commit()
+
+    removed_files = 0
+    if delete_files:
+        removed_files = _unlink_asset_files(path, thumb_path)
+
+    return {
+        "id": asset_id,
+        "deleted": True,
+        "character_id": character_id,
+        "files_removed": removed_files,
+    }
+
+
+async def delete_assets_bulk(
+    db: AsyncSession,
+    *,
+    character_id: str,
+    asset_ids: list[str] | None = None,
+    decision: str | None = None,
+    delete_files: bool = True,
+) -> dict:
+    """Delete many assets for a character. Filter by ids and/or decision (e.g. rejected)."""
+    q = select(Asset).where(Asset.character_id == character_id)
+    if asset_ids:
+        q = q.where(Asset.id.in_(asset_ids))
+    if decision:
+        q = q.where(Asset.decision == decision)
+    rows = (await db.execute(q)).scalars().all()
+    ids = [a.id for a in rows]
+    deleted = 0
+    files_removed = 0
+    for aid in ids:
+        result = await delete_asset(db, aid, delete_files=delete_files)
+        deleted += 1
+        files_removed += int(result.get("files_removed") or 0)
+    return {
+        "character_id": character_id,
+        "deleted": deleted,
+        "files_removed": files_removed,
+    }
+
+
 async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
     """Apply a worker Redis event (sole SQLite writer for real Comfy jobs)."""
     job_id = event.get("job_id")

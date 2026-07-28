@@ -113,6 +113,29 @@ async def get_character(db: AsyncSession, character_id: str) -> Character:
     return c
 
 
+async def create_random_character(
+    db: AsyncSession,
+    *,
+    seed: int | None = None,
+    auto_attest: bool = True,
+    auto_bootstrap: bool = True,
+) -> dict:
+    """Create a fully filled random adult synthetic persona."""
+    from app.services.random_character import build_random_character_create
+
+    payload = build_random_character_create(seed=seed, auto_attest=auto_attest)
+    character = await create_character(db, payload)
+    if auto_bootstrap and character.get("synthetic_confirmed") and character.get(
+        "not_real_person_attested"
+    ):
+        try:
+            character = await mark_bootstrap(db, character["id"])
+        except CharacterServiceError:
+            # Leave as draft if bootstrap rules change
+            pass
+    return character
+
+
 async def create_character(db: AsyncSession, payload: CharacterCreate) -> dict:
     base = payload.slug or _unique_slug_base(payload.display_name)
     slug = await _ensure_unique_slug(db, _unique_slug_base(base))

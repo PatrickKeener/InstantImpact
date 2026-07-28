@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, Character } from "../api";
 
 const statusColor: Record<string, string> = {
@@ -11,8 +11,10 @@ const statusColor: Record<string, string> = {
 };
 
 export default function CharacterList() {
+  const nav = useNavigate();
   const [chars, setChars] = useState<Character[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api
@@ -21,16 +23,40 @@ export default function CharacterList() {
       .catch((e) => setError(e.message));
   }, []);
 
+  async function randomCharacter() {
+    setBusy(true);
+    setError(null);
+    try {
+      const c = await api.createRandomCharacter({ auto_attest: true, auto_bootstrap: true });
+      setChars((prev) => [c, ...prev]);
+      nav(`/characters/${c.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-3xl">Characters</h1>
           <p className="mt-1 text-slate-400">Synthetic personas · multi-character library</p>
         </div>
-        <Link to="/characters/new" className="btn-primary">
-          New character
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={busy}
+            onClick={() => void randomCharacter()}
+          >
+            {busy ? "Rolling…" : "Random character"}
+          </button>
+          <Link to="/characters/new" className="btn-primary">
+            New character
+          </Link>
+        </div>
       </div>
 
       {error && <div className="text-sm text-red-300">{error}</div>}

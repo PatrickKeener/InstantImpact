@@ -1,0 +1,20 @@
+FROM python:3.11-slim-bookworm
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md ./
+COPY packages ./packages
+COPY apps ./apps
+COPY workflows ./workflows
+
+RUN pip install --no-cache-dir -U pip \
+ && pip install --no-cache-dir -e ".[dev]"
+
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8001
+
+CMD ["python", "-m", "uvicorn", "app.main:app", "--app-dir", "apps/api", "--host", "0.0.0.0", "--port", "8001"]

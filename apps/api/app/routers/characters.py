@@ -11,6 +11,7 @@ from app.schemas.characters import (
     LockCharacterRequest,
     PromptPreviewRequest,
     PromptPreviewResponse,
+    RandomCharacterRequest,
     TransitionResponse,
 )
 from app.services import characters as svc
@@ -33,6 +34,24 @@ async def list_characters(
 async def create_character(payload: CharacterCreate, db: AsyncSession = Depends(get_db)):
     try:
         return await svc.create_character(db, payload)
+    except svc.CharacterServiceError as e:
+        raise _err(e) from e
+
+
+@router.post("/random", response_model=CharacterOut)
+async def create_random_character(
+    payload: RandomCharacterRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Build and save a random adult synthetic persona (curated fields, no LLM)."""
+    body = payload or RandomCharacterRequest()
+    try:
+        return await svc.create_random_character(
+            db,
+            seed=body.seed,
+            auto_attest=body.auto_attest,
+            auto_bootstrap=body.auto_bootstrap,
+        )
     except svc.CharacterServiceError as e:
         raise _err(e) from e
 

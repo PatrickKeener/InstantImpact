@@ -103,6 +103,15 @@ export const api = {
   getCharacter: (id: string) => request<Character>(`/api/characters/${id}`),
   createCharacter: (body: unknown) =>
     request<Character>("/api/characters", { method: "POST", body: JSON.stringify(body) }),
+  createRandomCharacter: (body?: {
+    seed?: number;
+    auto_attest?: boolean;
+    auto_bootstrap?: boolean;
+  }) =>
+    request<Character>("/api/characters/random", {
+      method: "POST",
+      body: JSON.stringify(body || {}),
+    }),
   updateCharacter: (id: string, body: unknown) =>
     request<Character>(`/api/characters/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   bootstrap: (id: string) =>
@@ -139,6 +148,19 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ decision }),
     }),
+  deleteAsset: (assetId: string, deleteFiles = true) =>
+    request<{ id: string; deleted: boolean; character_id: string; files_removed: number }>(
+      `/api/assets/${assetId}?delete_files=${deleteFiles ? "true" : "false"}`,
+      { method: "DELETE" }
+    ),
+  bulkDeleteAssets: (
+    characterId: string,
+    body: { asset_ids?: string[]; decision?: string; delete_files?: boolean }
+  ) =>
+    request<{ character_id: string; deleted: number; files_removed: number }>(
+      `/api/characters/${characterId}/assets/delete`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
   mediaUrl: (relPath: string) => {
     const url = `/api/system/media/${relPath}`;
     // img tags cannot set Authorization; if token required, use query (dev only) or same-origin session later
