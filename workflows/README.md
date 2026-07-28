@@ -20,4 +20,8 @@ Runnable **Flux FP8** graph using `CheckpointLoaderSimple` (matches Comfy-Org `f
 | `SEED` / `WIDTH` / `HEIGHT` / `STEPS` / `CFG` | Sampler + latent |
 | `FILENAME_PREFIX` | Comfy SaveImage prefix (worker renames into `data/outputs/`) |
 
-Defaults: CFG **1.0**, steps **20** (FP8 checkpoint path). No LoRA/IP-Adapter nodes yet.
+Defaults: CFG **1.0**, steps **28**. No LoRA.
+
+## `flux_still_character_lora_v1.json`
+
+Same as above plus **LoraLoader** (`LORA_NAME`, `LORA_STRENGTH`). Selected automatically when the character version has `pipeline_params.flux.comfy_lora_name` after **Register LoRA**.

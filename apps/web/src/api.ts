@@ -65,9 +65,26 @@ export type Character = {
     boundaries: Record<string, unknown>;
     speaking_style: Record<string, unknown>;
     trigger_word: string | null;
+    lora_path?: string | null;
     prompt_contract: Record<string, unknown>;
     pipeline_params: Record<string, unknown>;
   } | null;
+};
+
+export type LoraStatus = {
+  character_id: string;
+  status: string;
+  approved_stills: number;
+  dataset_images: number;
+  trigger_word: string | null;
+  lora_path: string | null;
+  lora_file_present: boolean | null;
+  comfy_lora_name: string | null;
+  version_id: string | null;
+  version_int: number | null;
+  ready_for_dataset: boolean;
+  recommended_min: number;
+  warning?: string | null;
 };
 
 export type Job = {
@@ -135,6 +152,34 @@ export const api = {
     }),
   stillBatch: (id: string, body: unknown) =>
     request<Job>(`/api/characters/${id}/still-batch`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  loraStatus: (id: string) => request<LoraStatus>(`/api/characters/${id}/lora/status`),
+  buildDataset: (id: string, body?: { decision?: string; min_images?: number }) =>
+    request<{
+      character: Character;
+      dataset_dir: string;
+      trigger_word: string;
+      image_count: number;
+      warning: string | null;
+      train_config: Record<string, unknown>;
+      lora_dir: string;
+    }>(`/api/characters/${id}/dataset/build`, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
+    }),
+  registerLora: (
+    id: string,
+    body: { source_path: string; strength?: number; install_to_comfy?: boolean }
+  ) =>
+    request<{
+      character: Character;
+      comfy_lora_name: string;
+      trigger_word: string;
+      message: string;
+      lora_path: string;
+    }>(`/api/characters/${id}/lora/register`, {
       method: "POST",
       body: JSON.stringify(body),
     }),

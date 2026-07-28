@@ -20,6 +20,8 @@ def render_flux_prompts(
         contract = PromptContract.model_validate(contract)
 
     parts: list[str] = []
+    # Lead with photo intent — Flux weights early tokens heavily
+    parts.append("photorealistic photograph")
     parts.extend(contract.subject_tokens)
     parts.extend(contract.appearance_tokens)
     parts.extend(contract.style_tokens)
@@ -27,7 +29,12 @@ def render_flux_prompts(
     scene = THEME_HINTS.get(theme, theme.replace("_", " "))
     parts.append(scene)
     if outfit_hint:
-        parts.append(f"wearing {outfit_hint}")
+        # Avoid "wearing nude" awkwardness; pass outfit as-is if it already describes state
+        oh = outfit_hint.strip()
+        if oh.lower().startswith(("nude", "naked", "topless", "wearing ")):
+            parts.append(oh)
+        else:
+            parts.append(f"wearing {oh}")
     if pose_hint:
         parts.append(pose_hint)
     if location_hint:

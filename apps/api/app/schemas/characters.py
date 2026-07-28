@@ -56,6 +56,20 @@ class RandomCharacterRequest(BaseModel):
     )
 
 
+class BuildDatasetRequest(BaseModel):
+    decision: str = Field(default="approved", description="Asset decision filter")
+    min_images: int = Field(default=4, ge=1, le=200)
+
+
+class RegisterLoraRequest(BaseModel):
+    source_path: str = Field(
+        min_length=1,
+        description="Absolute path to .safetensors on nemesis, or path under data/",
+    )
+    strength: float = Field(default=0.85, ge=0.0, le=2.0)
+    install_to_comfy: bool = True
+
+
 class CharacterUpdate(BaseModel):
     display_name: str | None = None
     age_appearance_min: int | None = Field(default=None, ge=21)

@@ -66,6 +66,43 @@ GLOBAL_NEGATIVE_FRAGMENTS: list[str] = [
     "mutated",
     "low quality",
     "blurry face",
+    # Anti-illustration / cartoon drift (common with Flux FP8)
+    "cartoon",
+    "anime",
+    "manga",
+    "comic",
+    "illustration",
+    "drawing",
+    "painting",
+    "digital art",
+    "3d render",
+    "cgi",
+    "pixar",
+    "disney",
+    "stylized",
+    "cel shaded",
+    "airbrushed skin",
+    "plastic skin",
+    "doll-like",
+    "uncanny",
+    "overprocessed",
+    "oversaturated",
+    "fake skin",
+]
+
+# Positive quality stack for photoreal stills
+PHOTOREAL_QUALITY_TOKENS: list[str] = [
+    "photorealistic photograph",
+    "real human skin texture",
+    "natural skin pores",
+    "subtle skin imperfections",
+    "natural lighting",
+    "shot on 85mm lens",
+    "shallow depth of field",
+    "sharp eyes",
+    "professional photography",
+    "raw photo",
+    "true-to-life colors",
 ]
 
 # Age-positive tokens encouraged in subject line

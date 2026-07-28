@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.characters import (
+    BuildDatasetRequest,
     CharacterCreate,
     CharacterOut,
     CharacterUpdate,
@@ -12,9 +13,11 @@ from app.schemas.characters import (
     PromptPreviewRequest,
     PromptPreviewResponse,
     RandomCharacterRequest,
+    RegisterLoraRequest,
     TransitionResponse,
 )
 from app.services import characters as svc
+from app.services import lora as lora_svc
 
 router = APIRouter(prefix="/api/characters", tags=["characters"])
 
@@ -122,6 +125,52 @@ async def preview_prompt(
             pose_hint=payload.pose_hint,
             location_hint=payload.location_hint,
             extra_prompt=payload.extra_prompt,
+        )
+    except svc.CharacterServiceError as e:
+        raise _err(e) from e
+
+
+@router.get("/{character_id}/lora/status")
+async def get_lora_status(character_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        return await lora_svc.lora_status(db, character_id)
+    except svc.CharacterServiceError as e:
+        raise _err(e) from e
+
+
+@router.post("/{character_id}/dataset/build")
+async def build_dataset(
+    character_id: str,
+    payload: BuildDatasetRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Build LoRA training dataset from approved stills + captions + train_config."""
+    body = payload or BuildDatasetRequest()
+    try:
+        return await lora_svc.build_training_dataset(
+            db,
+            character_id,
+            decision=body.decision,
+            min_images=body.min_images,
+        )
+    except svc.CharacterServiceError as e:
+        raise _err(e) from e
+
+
+@router.post("/{character_id}/lora/register")
+async def register_lora(
+    character_id: str,
+    payload: RegisterLoraRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Register a trained .safetensors LoRA for this character and install into Comfy."""
+    try:
+        return await lora_svc.register_lora(
+            db,
+            character_id,
+            source_path=payload.source_path,
+            strength=payload.strength,
+            install_to_comfy=payload.install_to_comfy,
         )
     except svc.CharacterServiceError as e:
         raise _err(e) from e

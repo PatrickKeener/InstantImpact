@@ -1,0 +1,355 @@
+"""Character LoRA dataset build + weight registration (identity lock path)."""
+
+from __future__ import annotations
+
+import json
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import get_settings
+from app.db.models import Asset
+from app.services.characters import (
+    CharacterServiceError,
+    _working_version,
+    character_to_out,
+    get_character,
+)
+from app.services.storage import get_layout, write_json
+from instantimpact_common.enums import CharacterStatus
+from instantimpact_prompts.contract import build_prompt_contract
+
+MIN_IMAGES_SOFT = 8
+MIN_IMAGES_HARD = 4  # allow small tests; UI warns below 12
+
+
+def _safe_data_path(rel: str) -> Path | None:
+    layout = get_layout()
+    root = layout.root.resolve()
+    target = (root / str(rel).replace("\\", "/").lstrip("/")).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return None
+    return target if target.is_file() else None
+
+
+def _caption_for_asset(
+    *,
+    trigger: str,
+    asset: Asset,
+    appearance: dict[str, Any],
+) -> str:
+    """Simple MVP caption: trigger + what varies; keep identity light for LoRA."""
+    parts = [trigger, "adult woman 21+", "photorealistic photograph"]
+    for key in ("hair_color", "hair_style", "eye_color", "body_type"):
+        val = appearance.get(key)
+        if val:
+            parts.append(str(val))
+    # Pull theme-ish words from original prompt if present
+    pos = (asset.prompt_positive or "")[:200]
+    for token in ("portrait", "bedroom", "lingerie", "outdoor", "glamour", "mirror", "gym"):
+        if token in pos.lower():
+            parts.append(token)
+    if asset.seed is not None:
+        parts.append("unique pose and framing")
+    # de-dupe
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in parts:
+        k = p.lower()
+        if k not in seen:
+            seen.add(k)
+            out.append(p)
+    return ", ".join(out)
+
+
+async def build_training_dataset(
+    db: AsyncSession,
+    character_id: str,
+    *,
+    decision: str = "approved",
+    min_images: int = MIN_IMAGES_HARD,
+) -> dict[str, Any]:
+    """
+    Copy curated stills into version dataset/ with .txt captions + AI Toolkit stub config.
+    Also refreshes refs/ with copies of approved images.
+    """
+    c = await get_character(db, character_id)
+    if c.status == CharacterStatus.ARCHIVED:
+        raise CharacterServiceError("Cannot build dataset for archived character")
+    if not c.synthetic_confirmed or not c.not_real_person_attested:
+        raise CharacterServiceError("Confirm synthetic + not-real-person first")
+
+    version = _working_version(c)
+    if not version:
+        raise CharacterServiceError("No character version")
+
+    q = (
+        select(Asset)
+        .where(Asset.character_id == character_id)
+        .where(Asset.kind == "still")
+        .where(Asset.decision == decision)
+        .order_by(Asset.created_at.desc())
+    )
+    assets = list((await db.execute(q)).scalars().all())
+    if len(assets) < min_images:
+        raise CharacterServiceError(
+            f"Need at least {min_images} {decision} stills to build a dataset "
+            f"(have {len(assets)}). Approve more photo-quality images first.",
+            400,
+        )
+
+    layout = get_layout()
+    ds_dir = layout.dataset_dir(c.id, version.version_int)
+    refs_dir = layout.refs_dir(c.id, version.version_int)
+    lora_dir = layout.lora_dir(c.id, version.version_int)
+    for d in (ds_dir, refs_dir, lora_dir):
+        d.mkdir(parents=True, exist_ok=True)
+
+    # Clear previous dataset images (keep folder)
+    for old in ds_dir.glob("*"):
+        if old.is_file() and old.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".txt"}:
+            old.unlink()
+
+    trigger = version.trigger_word or f"sks_{c.slug[:40]}_v{version.version_int}"
+    version.trigger_word = trigger
+    appearance = version.appearance_json or {}
+
+    copied = 0
+    captions: list[dict[str, Any]] = []
+    for i, asset in enumerate(assets):
+        src = _safe_data_path(asset.path)
+        if not src:
+            continue
+        ext = src.suffix.lower() or ".png"
+        if ext not in {".png", ".jpg", ".jpeg", ".webp"}:
+            ext = ".png"
+        stem = f"{i + 1:03d}"
+        dest = ds_dir / f"{stem}{ext}"
+        shutil.copy2(src, dest)
+        cap = _caption_for_asset(trigger=trigger, asset=asset, appearance=appearance)
+        (ds_dir / f"{stem}.txt").write_text(cap + "\n", encoding="utf-8")
+        captions.append({"file": dest.name, "caption": cap, "asset_id": asset.id})
+        # First few into refs pack
+        if i < 8:
+            ref_name = f"ref_{stem}{ext}"
+            shutil.copy2(src, refs_dir / ref_name)
+        copied += 1
+
+    if copied < min_images:
+        raise CharacterServiceError(
+            f"Only {copied} image files could be read from disk (need {min_images})",
+            400,
+        )
+
+    # Rebuild prompt contract with trigger
+    contract = build_prompt_contract(
+        appearance=appearance,
+        boundaries=version.boundaries_json or {},
+        trigger_word=trigger,
+    )
+    version.prompt_contract_json = contract.model_dump()
+    version.ref_pack_path = str(refs_dir.relative_to(layout.root)).replace("\\", "/")
+
+    train_cfg = {
+        "tool": "ostris_ai_toolkit",
+        "base": "flux",
+        "trigger_word": trigger,
+        "dataset_dir": str(ds_dir),
+        "output_dir": str(lora_dir),
+        "network": {"type": "lora", "linear": 16, "linear_alpha": 16},
+        "steps_suggested": 1500,
+        "lr_suggested": 1e-4,
+        "resolution": 1024,
+        "notes": (
+            "Train with Ostris AI Toolkit (or compatible Flux LoRA trainer). "
+            "Place final weights as model.safetensors in output_dir, then "
+            "POST /api/characters/{id}/lora/register."
+        ),
+        "image_count": copied,
+        "built_at": datetime.now(timezone.utc).isoformat(),
+        "decision_filter": decision,
+    }
+    write_json(lora_dir / "train_config.json", train_cfg)
+    write_json(ds_dir / "manifest.json", {"trigger": trigger, "items": captions})
+
+    # First-time path: mark training until LoRA registered + locked
+    if not c.locked_version_id and c.status in (
+        CharacterStatus.DRAFT,
+        CharacterStatus.BOOTSTRAP,
+        CharacterStatus.TRAINING,
+    ):
+        c.status = CharacterStatus.TRAINING
+
+    c.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return {
+        "character": character_to_out(await get_character(db, character_id)),
+        "dataset_dir": str(ds_dir.relative_to(layout.root)).replace("\\", "/"),
+        "refs_dir": str(refs_dir.relative_to(layout.root)).replace("\\", "/"),
+        "lora_dir": str(lora_dir.relative_to(layout.root)).replace("\\", "/"),
+        "trigger_word": trigger,
+        "image_count": copied,
+        "train_config": train_cfg,
+        "warning": (
+            None
+            if copied >= 12
+            else f"Only {copied} images — aim for 12–30 approved photo stills for a stronger LoRA."
+        ),
+    }
+
+
+async def register_lora(
+    db: AsyncSession,
+    character_id: str,
+    *,
+    source_path: str,
+    strength: float = 0.85,
+    install_to_comfy: bool = True,
+) -> dict[str, Any]:
+    """
+    Install a trained .safetensors into the character version + Comfy loras folder.
+    source_path: absolute path on the server, or path relative to data/.
+    """
+    c = await get_character(db, character_id)
+    version = _working_version(c)
+    if not version:
+        raise CharacterServiceError("No character version")
+
+    layout = get_layout()
+    src = Path(source_path).expanduser()
+    if not src.is_file():
+        # try under data/
+        alt = _safe_data_path(source_path)
+        if alt:
+            src = alt
+    if not src.is_file():
+        raise CharacterServiceError(f"LoRA file not found: {source_path}", 404)
+    if src.suffix.lower() != ".safetensors":
+        raise CharacterServiceError("LoRA must be a .safetensors file")
+
+    lora_dir = layout.lora_dir(c.id, version.version_int)
+    lora_dir.mkdir(parents=True, exist_ok=True)
+    dest = lora_dir / "model.safetensors"
+    shutil.copy2(src, dest)
+
+    comfy_name = f"ii_{c.slug}_v{version.version_int:03d}.safetensors"
+    comfy_installed = None
+    settings = get_settings()
+    if install_to_comfy:
+        comfy_loras = Path(settings.comfy_loras_dir).expanduser()
+        comfy_loras.mkdir(parents=True, exist_ok=True)
+        target = comfy_loras / comfy_name
+        shutil.copy2(dest, target)
+        comfy_installed = str(target)
+
+    version.lora_path = str(dest.relative_to(layout.root)).replace("\\", "/")
+    params = dict(version.pipeline_params_json or {})
+    flux = dict(params.get("flux") or {})
+    flux["lora_strength"] = float(strength)
+    flux["comfy_lora_name"] = comfy_name
+    params["flux"] = flux
+    version.pipeline_params_json = params
+
+    # Ensure trigger in contract
+    trigger = version.trigger_word or f"sks_{c.slug[:40]}_v{version.version_int}"
+    version.trigger_word = trigger
+    version.prompt_contract_json = build_prompt_contract(
+        appearance=version.appearance_json or {},
+        boundaries=version.boundaries_json or {},
+        trigger_word=trigger,
+    ).model_dump()
+
+    write_json(
+        lora_dir / "register.json",
+        {
+            "registered_at": datetime.now(timezone.utc).isoformat(),
+            "source": str(src),
+            "comfy_lora_name": comfy_name,
+            "comfy_path": comfy_installed,
+            "strength": strength,
+            "trigger_word": trigger,
+        },
+    )
+
+    # Stay in training until human lock; if already ready, keep ready (retrain track)
+    if c.status == CharacterStatus.TRAINING:
+        pass  # wait for lock
+    elif c.status == CharacterStatus.BOOTSTRAP:
+        c.status = CharacterStatus.TRAINING
+
+    c.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return {
+        "character": character_to_out(await get_character(db, character_id)),
+        "lora_path": version.lora_path,
+        "comfy_lora_name": comfy_name,
+        "comfy_installed": comfy_installed,
+        "trigger_word": trigger,
+        "strength": strength,
+        "message": (
+            "LoRA registered. Restart or refresh Comfy if it was already running so it sees "
+            f"{comfy_name}. Then lock the character and generate — stills will load this LoRA."
+        ),
+    }
+
+
+async def lora_status(db: AsyncSession, character_id: str) -> dict[str, Any]:
+    c = await get_character(db, character_id)
+    version = _working_version(c)
+    layout = get_layout()
+    approved = list(
+        (
+            await db.execute(
+                select(Asset)
+                .where(Asset.character_id == character_id)
+                .where(Asset.decision == "approved")
+                .where(Asset.kind == "still")
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    ds_count = 0
+    lora_file = None
+    train_cfg = None
+    comfy_lora = None
+    if version:
+        ds_dir = layout.dataset_dir(c.id, version.version_int)
+        if ds_dir.is_dir():
+            ds_count = len(
+                [p for p in ds_dir.iterdir() if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}]
+            )
+        if version.lora_path:
+            lp = layout.root / version.lora_path
+            lora_file = lp.is_file()
+        cfg_path = layout.lora_dir(c.id, version.version_int) / "train_config.json"
+        if cfg_path.is_file():
+            train_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        flux = (version.pipeline_params_json or {}).get("flux") or {}
+        comfy_lora = flux.get("comfy_lora_name")
+
+    n_approved = len(approved)
+    return {
+        "character_id": character_id,
+        "status": c.status,
+        "approved_stills": n_approved,
+        "dataset_images": ds_count,
+        "trigger_word": version.trigger_word if version else None,
+        "lora_path": version.lora_path if version else None,
+        "lora_file_present": lora_file,
+        "comfy_lora_name": comfy_lora,
+        "train_config": train_cfg,
+        "version_id": version.id if version else None,
+        "version_int": version.version_int if version else None,
+        "ready_for_dataset": n_approved >= MIN_IMAGES_HARD,
+        "recommended_min": 12,
+    }

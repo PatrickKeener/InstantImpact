@@ -5,6 +5,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Path already used for data_dir defaults
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -34,6 +36,8 @@ class Settings(BaseSettings):
     # Checkpoint filename inside ComfyUI/models/checkpoints/
     comfy_ckpt_name: str = "flux1-dev-fp8.safetensors"
     comfy_timeout_seconds: float = 600.0
+    # Where to install character LoRAs for Comfy (models/loras)
+    comfy_loras_dir: str = str(Path.home() / "ComfyUI" / "models" / "loras")
 
     strict_offline: bool = False
     require_auth_token: bool = False

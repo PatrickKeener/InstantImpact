@@ -10,10 +10,15 @@ from instantimpact_comfy.binder import (
 
 
 def test_flux_template_has_required_placeholders():
+    from instantimpact_comfy.binder import FLUX_STILL_LORA_REQUIRED_VARS
+
     root = Path(__file__).resolve().parents[1]
     wf = load_workflow(root / "workflows" / "flux_still_character_v1.json")
     errors = validate_placeholders(wf, FLUX_STILL_REQUIRED_VARS)
     assert errors == []
+    wf_l = load_workflow(root / "workflows" / "flux_still_character_lora_v1.json")
+    errors_l = validate_placeholders(wf_l, FLUX_STILL_LORA_REQUIRED_VARS)
+    assert errors_l == []
 
 
 def test_bind_workflow_substitutes():

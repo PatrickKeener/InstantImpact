@@ -101,6 +101,7 @@ async def _run_mock(redis: Any, snapshot: dict) -> dict:
 
 async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     from instantimpact_comfy.binder import (
+        FLUX_STILL_LORA_REQUIRED_VARS,
         FLUX_STILL_REQUIRED_VARS,
         bind_workflow,
         load_workflow,
@@ -116,6 +117,15 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     contract = snapshot.get("prompt_contract") or {}
     pipeline_params = snapshot.get("pipeline_params") or {}
     flux_params = pipeline_params.get("flux") or pipeline_params
+    trigger = snapshot.get("trigger_word") or (contract.get("trigger_word") if isinstance(contract, dict) else None)
+    lora_name = flux_params.get("comfy_lora_name") or None
+    lora_strength = float(flux_params.get("lora_strength") if flux_params.get("lora_strength") is not None else 0.85)
+    # Also accept bare lora_path basename if it ends with .safetensors and looks installed
+    if not lora_name and snapshot.get("lora_path"):
+        lp = str(snapshot["lora_path"])
+        if lp.endswith(".safetensors"):
+            # Prefer ii_* name from register; otherwise basename may not be in Comfy
+            pass
 
     comfy_url = os.environ.get("INSTANTIMPACT_COMFY_URL", "http://127.0.0.1:8188")
     ckpt_name = os.environ.get("INSTANTIMPACT_COMFY_CKPT_NAME", "flux1-dev-fp8.safetensors")
@@ -129,7 +139,10 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     out_dir = data_dir / "outputs" / character_id / job_id / "stills"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    wf_path = workflows_dir / "flux_still_character_v1.json"
+    use_lora = bool(lora_name)
+    wf_name = "flux_still_character_lora_v1.json" if use_lora else "flux_still_character_v1.json"
+    required = FLUX_STILL_LORA_REQUIRED_VARS if use_lora else FLUX_STILL_REQUIRED_VARS
+    wf_path = workflows_dir / wf_name
     if not wf_path.is_file():
         await _publish(
             redis,
@@ -143,7 +156,7 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         return {"ok": False}
 
     template = load_workflow(wf_path)
-    errors = validate_placeholders(template, FLUX_STILL_REQUIRED_VARS)
+    errors = validate_placeholders(template, required)
     if errors:
         await _publish(
             redis,
@@ -169,12 +182,14 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         )
         return {"ok": False}
 
-    # Defaults tuned for flux1-dev-fp8 checkpoint (CFG ~1.0)
-    default_steps = int(flux_params.get("steps") or 20)
+    # Defaults tuned for flux1-dev-fp8 checkpoint (CFG ~1.0, more steps for detail)
+    default_steps = int(flux_params.get("steps") or 28)
     default_cfg = float(flux_params.get("cfg") if flux_params.get("cfg") is not None else 1.0)
     # FP8 checkpoint quality path: force cfg near 1 if someone left SD-like 3.5+
     if default_cfg > 2.0:
         default_cfg = 1.0
+    if default_steps < 20:
+        default_steps = 28
 
     meta_aspect = (snapshot.get("meta") or {}).get("aspect_ratio") or "4:5"
     failures = 0
@@ -206,6 +221,9 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         # Soft adult / synthetic bias for character stills (not a safety replacement)
         if "adult" not in positive.lower() and "21" not in positive:
             positive = f"adult woman 25 years old, {positive}" if positive else "adult woman 25 years old"
+        # Ensure trigger token is present when using a character LoRA
+        if trigger and trigger not in positive:
+            positive = f"{trigger}, {positive}"
 
         prefix = f"ii_{job_id[:8]}_{item_index:03d}"
         variables = {
@@ -219,6 +237,9 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             "CFG": float(item.get("cfg") or default_cfg),
             "FILENAME_PREFIX": prefix,
         }
+        if use_lora:
+            variables["LORA_NAME"] = lora_name
+            variables["LORA_STRENGTH"] = lora_strength
 
         try:
             bound = bind_workflow(template, variables)

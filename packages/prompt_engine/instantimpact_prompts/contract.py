@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from instantimpact_common.enums import Pipeline
-from instantimpact_common.safety_lists import ADULT_APPEARANCE_TOKENS, GLOBAL_NEGATIVE_FRAGMENTS
+from instantimpact_common.safety_lists import (
+    ADULT_APPEARANCE_TOKENS,
+    GLOBAL_NEGATIVE_FRAGMENTS,
+    PHOTOREAL_QUALITY_TOKENS,
+)
 from instantimpact_common.schemas import (
     AppearanceProfile,
     BoundariesProfile,
@@ -49,18 +53,39 @@ def build_prompt_contract(
     if trigger_word:
         subject_tokens.insert(0, trigger_word)
 
-    quality_tokens = [
-        "photorealistic",
-        "high detail skin",
-        "natural pores",
-        "consistent facial identity",
-        "professional photography",
+    quality_tokens = list(PHOTOREAL_QUALITY_TOKENS)
+    quality_tokens.append("consistent facial identity")
+
+    # Drop style keywords that push illustration/cartoon unless user insisted via freeform
+    style_tokens = [
+        s
+        for s in style_tokens
+        if not any(
+            bad in s.lower()
+            for bad in (
+                "cartoon",
+                "anime",
+                "illustration",
+                "stylized",
+                "comic",
+                "pixar",
+                "cgi",
+                "3d render",
+            )
+        )
     ]
 
     negative = list(GLOBAL_NEGATIVE_FRAGMENTS)
     for ban in boundaries.hard_bans:
         if ban and ban.strip():
             negative.append(ban.strip())
+
+    # Nudge freeform notes toward photo if empty of camera language
+    notes = appearance.freeform_notes
+    if notes and "photo" not in notes.lower() and "camera" not in notes.lower():
+        notes = f"{notes}, photorealistic DSLR photo"
+    elif not notes:
+        notes = "photorealistic DSLR photo of a real adult woman"
 
     return PromptContract(
         subject_tokens=subject_tokens,
@@ -70,5 +95,5 @@ def build_prompt_contract(
         negative_tokens=negative,
         trigger_word=trigger_word,
         pipeline=pipeline,
-        raw_notes=appearance.freeform_notes,
+        raw_notes=notes,
     )

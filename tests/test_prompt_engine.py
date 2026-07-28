@@ -17,5 +17,7 @@ def test_render_includes_trigger_and_adult_tokens():
     pos, neg = render_flux_prompts(contract, theme="casual_bedroom", outfit_hint="oversized tee")
     assert "sks_aria_v1" in pos
     assert "21+" in pos or "adult" in pos.lower()
+    assert "photorealistic" in pos.lower() or "photograph" in pos.lower()
     assert "violence" in neg
     assert "child" in neg
+    assert "cartoon" in neg or "anime" in neg

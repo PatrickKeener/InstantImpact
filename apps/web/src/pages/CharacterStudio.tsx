@@ -1,28 +1,34 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, Asset, Character, Job } from "../api";
+import { api, Asset, Character, Job, LoraStatus } from "../api";
 
 export default function CharacterStudio() {
   const { id } = useParams();
   const [character, setCharacter] = useState<Character | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [lora, setLora] = useState<LoraStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [batchCount, setBatchCount] = useState(4);
   const [theme, setTheme] = useState("casual_bedroom");
   const [outfit, setOutfit] = useState("oversized tee");
+  const [loraPath, setLoraPath] = useState("");
+  const [loraStrength, setLoraStrength] = useState(0.85);
 
   const refresh = useCallback(async () => {
     if (!id) return;
-    const [c, j, a] = await Promise.all([
+    const [c, j, a, l] = await Promise.all([
       api.getCharacter(id),
       api.listJobs(id),
       api.listAssets(id),
+      api.loraStatus(id),
     ]);
     setCharacter(c);
     setJobs(j);
     setAssets(a);
+    setLora(l);
   }, [id]);
 
   useEffect(() => {
@@ -96,11 +102,7 @@ export default function CharacterStudio() {
       setError("No rejected images to delete.");
       return;
     }
-    if (
-      !window.confirm(
-        `Permanently delete ${n} rejected image(s) from the library and disk?`
-      )
-    ) {
+    if (!window.confirm(`Permanently delete ${n} rejected image(s) from the library and disk?`)) {
       return;
     }
     setBusy(true);
@@ -115,11 +117,55 @@ export default function CharacterStudio() {
     }
   }
 
+  async function buildDataset() {
+    if (!id) return;
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const res = await api.buildDataset(id, { decision: "approved", min_images: 4 });
+      setInfo(
+        `Dataset ready: ${res.image_count} images · trigger "${res.trigger_word}" · ${res.dataset_dir}` +
+          (res.warning ? ` · ${res.warning}` : "")
+      );
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function registerLora() {
+    if (!id || !loraPath.trim()) {
+      setError("Enter the path to the trained .safetensors on nemesis.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const res = await api.registerLora(id, {
+        source_path: loraPath.trim(),
+        strength: loraStrength,
+        install_to_comfy: true,
+      });
+      setInfo(res.message);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!character) {
     return <div className="text-slate-400">{error || "Loading…"}</div>;
   }
 
   const unlocked = character.status === "bootstrap" || character.status === "draft";
+  const approvedCount = assets.filter((a) => a.decision === "approved").length;
+  const hasLora = Boolean(lora?.lora_file_present || lora?.comfy_lora_name);
 
   return (
     <div className="space-y-6">
@@ -142,6 +188,11 @@ export default function CharacterStudio() {
                 Locked production
               </span>
             )}
+            {hasLora && (
+              <span className="ml-2 rounded-full bg-violet-500/20 px-2 py-0.5 text-xs text-violet-200">
+                LoRA active
+              </span>
+            )}
           </p>
         </div>
       </div>
@@ -151,15 +202,20 @@ export default function CharacterStudio() {
           {error}
         </div>
       )}
+      {info && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-100">
+          {info}
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="card space-y-4 p-5">
           <h2 className="font-display text-xl">Seed gallery</h2>
           <p className="text-sm text-slate-400">
-            Generate-only reference candidates for consistency (mock placeholders until Flux
-            workflow is pinned).
+            Generate reference candidates. Approve the most photoreal, consistent faces for LoRA
+            training.
           </p>
-          <button className="btn-primary" disabled={busy} onClick={runSeed}>
+          <button className="btn-primary" disabled={busy} onClick={() => void runSeed()}>
             Generate seed set (6)
           </button>
         </section>
@@ -200,14 +256,107 @@ export default function CharacterStudio() {
             <label className="label">Outfit hint</label>
             <input className="input" value={outfit} onChange={(e) => setOutfit(e.target.value)} />
           </div>
-          <button className="btn-primary" disabled={busy} onClick={runBatch}>
+          <button className="btn-primary" disabled={busy} onClick={() => void runBatch()}>
             Generate batch
           </button>
           <p className="text-xs text-slate-500">
-            Requires bootstrap or ready + safety confirmations. Draft blocks still_batch.
+            {hasLora
+              ? `Using character LoRA (${lora?.comfy_lora_name}) + trigger ${lora?.trigger_word}`
+              : "No LoRA yet — identity will drift until you train and register one."}
           </p>
         </section>
       </div>
+
+      <section className="card space-y-4 p-5">
+        <h2 className="font-display text-xl">Identity LoRA</h2>
+        <p className="text-sm text-slate-400">
+          Lock face/body consistency: approve 12–30 photo-quality stills → build dataset → train
+          outside InstantImpact (AI Toolkit) → register the{" "}
+          <code className="text-slate-300">.safetensors</code> → lock character → generate.
+        </p>
+        <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl bg-white/5 px-3 py-2">
+            <div className="text-xs text-slate-500">Approved stills</div>
+            <div className="text-lg font-semibold">
+              {lora?.approved_stills ?? approvedCount}
+              <span className="text-xs font-normal text-slate-500">
+                {" "}
+                / {lora?.recommended_min ?? 12} rec.
+              </span>
+            </div>
+          </div>
+          <div className="rounded-xl bg-white/5 px-3 py-2">
+            <div className="text-xs text-slate-500">Dataset images</div>
+            <div className="text-lg font-semibold">{lora?.dataset_images ?? 0}</div>
+          </div>
+          <div className="rounded-xl bg-white/5 px-3 py-2">
+            <div className="text-xs text-slate-500">Trigger word</div>
+            <div className="truncate font-mono text-sm text-accent-soft">
+              {lora?.trigger_word || "—"}
+            </div>
+          </div>
+          <div className="rounded-xl bg-white/5 px-3 py-2">
+            <div className="text-xs text-slate-500">Comfy LoRA</div>
+            <div className="truncate font-mono text-sm">
+              {lora?.comfy_lora_name || (hasLora ? "registered" : "not installed")}
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={busy || approvedCount < 4}
+            onClick={() => void buildDataset()}
+          >
+            Build training set from approved
+          </button>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+          <div>
+            <label className="label">Trained LoRA path on nemesis</label>
+            <input
+              className="input font-mono text-xs"
+              placeholder="/home/pkeener/.../model.safetensors"
+              value={loraPath}
+              onChange={(e) => setLoraPath(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label">Strength</label>
+            <input
+              type="number"
+              min={0}
+              max={2}
+              step={0.05}
+              className="input w-24"
+              value={loraStrength}
+              onChange={(e) => setLoraStrength(Number(e.target.value))}
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              type="button"
+              className="btn-ghost w-full"
+              disabled={busy || !loraPath.trim()}
+              onClick={() => void registerLora()}
+            >
+              Register LoRA
+            </button>
+          </div>
+        </div>
+        <ol className="list-decimal space-y-1 pl-5 text-xs text-slate-500">
+          <li>Approve photoreal stills (reject cartoons / bad faces).</li>
+          <li>Build training set → creates dataset + captions under data/characters/…/dataset/</li>
+          <li>
+            On nemesis:{" "}
+            <code className="text-slate-400">./scripts/nemesis/train_lora_hint.sh &lt;character_id&gt;</code>
+          </li>
+          <li>Train with Ostris AI Toolkit (or compatible Flux LoRA trainer).</li>
+          <li>Register the output .safetensors here (installs into Comfy models/loras).</li>
+          <li>Edit character → Lock production, then batch stills with LoRA.</li>
+        </ol>
+      </section>
 
       <section className="card p-5">
         <h2 className="font-display text-xl">Recent jobs</h2>
