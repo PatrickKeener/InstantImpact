@@ -299,6 +299,14 @@ async def cancel_job(db: AsyncSession, job_id: str) -> dict:
     if job.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
         return job_to_out(job)
     job.cancel_requested = True
+    # Queued orphans (e.g. pre-fix mock jobs) never get a worker/API runner — close them now.
+    if job.status == JobStatus.QUEUED:
+        job.status = JobStatus.CANCELLED
+        job.finished_at = datetime.now(timezone.utc)
+        job.error_message = job.error_message or "Cancelled while queued"
+        for item in job.items:
+            if item.status in (JobItemStatus.PENDING, JobItemStatus.RUNNING):
+                item.status = JobItemStatus.SKIPPED
     settings = get_settings()
     try:
         import redis.asyncio as redis
@@ -374,6 +382,122 @@ async def set_asset_decision(
         "decision": asset.decision,
         "character_id": asset.character_id,
     }
+
+
+async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
+    """Apply a worker Redis event (sole SQLite writer for real Comfy jobs)."""
+    job_id = event.get("job_id")
+    if not job_id:
+        return
+    try:
+        job = await get_job(db, str(job_id))
+    except JobServiceError:
+        return
+
+    name = event.get("event")
+    if name == "running":
+        if job.status == JobStatus.QUEUED:
+            job.status = JobStatus.RUNNING
+            job.started_at = datetime.now(timezone.utc)
+            await db.commit()
+        return
+
+    if name == "cancelled":
+        job.status = JobStatus.CANCELLED
+        job.finished_at = datetime.now(timezone.utc)
+        for item in job.items:
+            if item.status in (JobItemStatus.PENDING, JobItemStatus.RUNNING):
+                item.status = JobItemStatus.SKIPPED
+        await db.commit()
+        return
+
+    if name == "failed":
+        job.status = JobStatus.FAILED
+        job.error_code = event.get("error_code")
+        job.error_message = event.get("message")
+        job.finished_at = datetime.now(timezone.utc)
+        await db.commit()
+        return
+
+    if name == "item_failed":
+        idx = event.get("item_index")
+        for item in job.items:
+            if item.item_index == idx:
+                item.status = JobItemStatus.FAILED
+                item.error_message = event.get("message")
+                break
+        await db.commit()
+        return
+
+    if name == "item_done":
+        # Mock worker events have no path — ignore (API mock runner owns mock assets)
+        path = event.get("path")
+        if not path:
+            return
+        idx = event.get("item_index")
+        item = next((i for i in job.items if i.item_index == idx), None)
+        if not item:
+            return
+        if item.status == JobItemStatus.DONE and item.asset_id:
+            return
+
+        from instantimpact_common.safety_lists import SYNTHETIC_DISCLOSURE_DEFAULT
+
+        asset_id = str(uuid.uuid4())
+        meta = event.get("meta") or {
+            "synthetic": True,
+            "ai_generated": True,
+            "disclosure": SYNTHETIC_DISCLOSURE_DEFAULT,
+            "pipeline": event.get("pipeline") or "flux",
+        }
+        asset = Asset(
+            id=asset_id,
+            character_id=job.character_id or "",
+            character_version_id=job.character_version_id or "",
+            job_id=job.id,
+            job_item_id=item.id,
+            kind="still",
+            path=str(path),
+            thumb_path=event.get("thumb_path"),
+            sha256=event.get("sha256") or "",
+            width=event.get("width"),
+            height=event.get("height"),
+            seed=event.get("seed"),
+            prompt_positive=event.get("prompt_positive"),
+            prompt_negative=event.get("prompt_negative"),
+            pipeline=event.get("pipeline") or "flux",
+            meta_json=meta,
+            decision="pending",
+        )
+        db.add(asset)
+        item.status = JobItemStatus.DONE
+        item.asset_id = asset_id
+        if job.status == JobStatus.QUEUED:
+            job.status = JobStatus.RUNNING
+            job.started_at = job.started_at or datetime.now(timezone.utc)
+        await db.commit()
+        return
+
+    if name == "completed":
+        # Mark done even if some items failed (partial success)
+        pending = [i for i in job.items if i.status in (JobItemStatus.PENDING, JobItemStatus.RUNNING)]
+        for i in pending:
+            i.status = JobItemStatus.SKIPPED
+        done = sum(1 for i in job.items if i.status == JobItemStatus.DONE)
+        failed = sum(1 for i in job.items if i.status == JobItemStatus.FAILED)
+        if done == 0 and failed > 0:
+            job.status = JobStatus.FAILED
+            job.error_message = event.get("message") or "All items failed"
+        else:
+            job.status = JobStatus.COMPLETED
+        job.finished_at = datetime.now(timezone.utc)
+        if job.brief_id:
+            bq = await db.execute(select(ContentBrief).where(ContentBrief.id == job.brief_id))
+            brief = bq.scalar_one_or_none()
+            if brief:
+                brief.status = "completed" if job.status == JobStatus.COMPLETED else "failed"
+        await db.commit()
+        return
 
 
 async def run_mock_job(db: AsyncSession, job_id: str) -> None:

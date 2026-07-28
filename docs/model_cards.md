@@ -4,9 +4,11 @@
 
 | ID | Role | Source | Approx size | License | SHA-256 | Status |
 |----|------|--------|-------------|---------|---------|--------|
-| `flux_dev_placeholder` | Flux still base | TBD — pin after bake-off | ~12–24 GB | Check source | TBD | not bootstrapped |
+| `flux1-dev-fp8` | Flux still base (Comfy checkpoint) | [Comfy-Org/flux1-dev](https://huggingface.co/Comfy-Org/flux1-dev) `flux1-dev-fp8.safetensors` | ~17 GB | BFL / see HF card | operator verify | **pinned for nemesis MVP** |
 | `character_lora` | Per-character | Local train (AI Toolkit) | ~50–300 MB | derivative | per train | per character |
 | `pulid_flux` / `ipadapter_flux` | Identity lock | TBD pin | varies | Check source | TBD | post bootstrap |
+
+**Comfy path:** place checkpoint in `ComfyUI/models/checkpoints/`. App setting: `INSTANTIMPACT_COMFY_CKPT_NAME=flux1-dev-fp8.safetensors`. Workflow: `workflows/flux_still_character_v1.json`.
 
 ## Disk budget (MVP path)
 

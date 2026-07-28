@@ -79,6 +79,49 @@ Open from any LAN machine:
 | `MOCK_GENERATION=true` | UI/API dev without Comfy |
 | `MOCK_GENERATION=false` + Comfy + worker | Production stills on L40S |
 
+### Real Flux stills (Comfy integration)
+
+Prerequisites on **nemesis**:
+
+1. Redis running (`redis-cli ping` → PONG)
+2. ComfyUI on `127.0.0.1:8188` with `flux1-dev-fp8.safetensors` in `ComfyUI/models/checkpoints/`
+3. InstantImpact `.env`:
+
+```text
+INSTANTIMPACT_MOCK_GENERATION=false
+INSTANTIMPACT_COMFY_ENABLED=true
+INSTANTIMPACT_COMFY_URL=http://127.0.0.1:8188
+INSTANTIMPACT_COMFY_CKPT_NAME=flux1-dev-fp8.safetensors
+INSTANTIMPACT_REDIS_URL=redis://127.0.0.1:6379/0
+```
+
+4. Start processes (separate terminals / tmux):
+
+```bash
+# API (example port 8001 if vLLM owns 8000)
+cd ~/InstantImpact
+.venv/bin/python -m uvicorn app.main:app --app-dir apps/api --reload --host 0.0.0.0 --port 8001
+
+# Worker — must see Comfy + workflows + data
+cd ~/InstantImpact/apps/worker
+export INSTANTIMPACT_REDIS_URL=redis://127.0.0.1:6379/0
+export INSTANTIMPACT_COMFY_URL=http://127.0.0.1:8188
+export INSTANTIMPACT_COMFY_CKPT_NAME=flux1-dev-fp8.safetensors
+export INSTANTIMPACT_DATA_DIR=/home/pkeener/InstantImpact/data
+export INSTANTIMPACT_WORKFLOWS_DIR=/home/pkeener/InstantImpact/workflows
+../../.venv/bin/python -m worker.main
+
+# Web
+cd ~/InstantImpact/apps/web
+VITE_API_PROXY=http://127.0.0.1:8001 npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+5. Free GPU for Flux if needed: `docker stop vllm`
+
+6. In the UI: seed gallery / batch stills → jobs go **Queued → Running → Completed** with real images (not MOCK STILL placeholders).
+
+Workflow template: `workflows/flux_still_character_v1.json` (CheckpointLoaderSimple FP8 path).
+
 ---
 
 ## Alternative: split chamber + nemesis (not recommended for MVP)

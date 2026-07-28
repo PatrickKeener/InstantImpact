@@ -1,26 +1,29 @@
 {
   "_meta": {
     "name": "flux_still_character_v1",
-    "description": "Placeholder Flux still graph with binder variables. Replace node IDs with a real exported ComfyUI API graph pinned for your install (PR-07).",
-    "required_custom_nodes": [
-      "ComfyUI-Flux (or native Flux nodes)",
-      "PuLID-Flux or IP-Adapter Flux (pin SHA at implement)"
-    ],
-    "note": "This is a structural stub so the binder/validator can be tested. It is NOT a runnable production graph until nodes are pinned against your ComfyUI tree."
+    "description": "Flux still via CheckpointLoaderSimple (FP8 single-file). Matches ComfyUI official flux1-dev-fp8 path. CFG should be ~1.0.",
+    "required_custom_nodes": [],
+    "checkpoint": "flux1-dev-fp8.safetensors (ComfyUI/models/checkpoints/)",
+    "note": "No LoRA/IP-Adapter in this graph yet — identity lock via prompt contract + later LoRA graph revision."
   },
-  "3": {
-    "class_type": "KSampler",
+  "4": {
+    "class_type": "CheckpointLoaderSimple",
     "inputs": {
-      "seed": "{{SEED}}",
-      "steps": "{{STEPS}}",
-      "cfg": "{{CFG}}",
-      "sampler_name": "euler",
-      "scheduler": "simple",
-      "denoise": 1,
-      "model": ["10", 0],
-      "positive": ["6", 0],
-      "negative": ["7", 0],
-      "latent_image": ["5", 0]
+      "ckpt_name": "{{CKPT_NAME}}"
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "{{POSITIVE_PROMPT}}",
+      "clip": ["4", 1]
+    }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "{{NEGATIVE_PROMPT}}",
+      "clip": ["4", 1]
     }
   },
   "5": {
@@ -31,25 +34,26 @@
       "batch_size": 1
     }
   },
-  "6": {
-    "class_type": "CLIPTextEncode",
+  "3": {
+    "class_type": "KSampler",
     "inputs": {
-      "text": "{{POSITIVE_PROMPT}}",
-      "clip": ["11", 0]
-    }
-  },
-  "7": {
-    "class_type": "CLIPTextEncode",
-    "inputs": {
-      "text": "{{NEGATIVE_PROMPT}}",
-      "clip": ["11", 0]
+      "seed": "{{SEED}}",
+      "steps": "{{STEPS}}",
+      "cfg": "{{CFG}}",
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "model": ["4", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["5", 0]
     }
   },
   "8": {
     "class_type": "VAEDecode",
     "inputs": {
       "samples": ["3", 0],
-      "vae": ["12", 0]
+      "vae": ["4", 2]
     }
   },
   "9": {
@@ -57,46 +61,6 @@
     "inputs": {
       "filename_prefix": "{{FILENAME_PREFIX}}",
       "images": ["8", 0]
-    }
-  },
-  "10": {
-    "class_type": "LoraLoaderModelOnly",
-    "inputs": {
-      "lora_name": "{{LORA_PATH}}",
-      "strength_model": "{{LORA_STRENGTH}}",
-      "model": ["13", 0]
-    }
-  },
-  "11": {
-    "class_type": "CLIPLoader",
-    "inputs": {
-      "clip_name": "flux_clip_placeholder.safetensors",
-      "type": "flux"
-    }
-  },
-  "12": {
-    "class_type": "VAELoader",
-    "inputs": {
-      "vae_name": "flux_vae_placeholder.safetensors"
-    }
-  },
-  "13": {
-    "class_type": "UNETLoader",
-    "inputs": {
-      "unet_name": "flux_dev_placeholder.safetensors",
-      "weight_dtype": "default"
-    }
-  },
-  "14": {
-    "class_type": "LoadImage",
-    "inputs": {
-      "image": "{{REF_FACE_PATH}}"
-    }
-  },
-  "15": {
-    "class_type": "Note",
-    "inputs": {
-      "text": "IP_ADAPTER_STRENGTH={{IP_ADAPTER_STRENGTH}} — wire real adapter nodes in PR-07"
     }
   }
 }

@@ -74,8 +74,9 @@ class FluxPipelineParams(BaseModel):
     lora_strength: float = 0.85
     ip_adapter_strength: float = 0.6
     pulid_strength: float = 0.7
-    steps: int = 28
-    cfg: float = 3.5
+    # Tuned for flux1-dev-fp8 CheckpointLoaderSimple (CFG ~1.0)
+    steps: int = 20
+    cfg: float = 1.0
     width: int = 1024
     height: int = 1280
 

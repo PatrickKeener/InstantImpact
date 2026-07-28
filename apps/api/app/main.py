@@ -56,7 +56,13 @@ class ApiTokenMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI):
     get_layout()  # bootstrap data dirs
     await init_db()
-    yield
+    from app.services.job_events import start_job_event_consumer, stop_job_event_consumer
+
+    start_job_event_consumer()
+    try:
+        yield
+    finally:
+        await stop_job_event_consumer()
 
 
 app = FastAPI(

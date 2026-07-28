@@ -69,8 +69,18 @@ def load_workflow(path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
-# Required keys for flux_still_character_v1
+def nodes_only(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Strip _meta and non-node keys before sending to Comfy /prompt."""
+    return {
+        k: v
+        for k, v in workflow.items()
+        if isinstance(v, dict) and "class_type" in v
+    }
+
+
+# Required keys for flux_still_character_v1 (CheckpointLoaderSimple / FP8 path)
 FLUX_STILL_REQUIRED_VARS = {
+    "CKPT_NAME",
     "POSITIVE_PROMPT",
     "NEGATIVE_PROMPT",
     "SEED",
@@ -78,9 +88,5 @@ FLUX_STILL_REQUIRED_VARS = {
     "HEIGHT",
     "STEPS",
     "CFG",
-    "LORA_PATH",
-    "LORA_STRENGTH",
-    "REF_FACE_PATH",
-    "IP_ADAPTER_STRENGTH",
     "FILENAME_PREFIX",
 }

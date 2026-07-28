@@ -52,7 +52,9 @@ Or run `.\scripts\dev_up.ps1` for setup hints.
 ### Mock vs real GPU
 
 - Default: `INSTANTIMPACT_MOCK_GENERATION=true` — placeholder stills so the UI/API work without ComfyUI.
-- Production path: install native ComfyUI on **nemesis**, pin workflow nodes (PR-07), set `INSTANTIMPACT_COMFY_ENABLED=true` and `MOCK_GENERATION=false`.
+- **Real Flux:** ComfyUI on `127.0.0.1:8188` with `flux1-dev-fp8.safetensors`, Redis + worker, then in `.env`:
+  `INSTANTIMPACT_MOCK_GENERATION=false`, `INSTANTIMPACT_COMFY_ENABLED=true`.
+  See [`docs/deployment.md`](docs/deployment.md) § Real Flux stills.
 
 ## Layout
 

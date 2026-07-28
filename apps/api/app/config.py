@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
     comfy_url: str = "http://127.0.0.1:8188"
     comfy_enabled: bool = False
+    # Checkpoint filename inside ComfyUI/models/checkpoints/
+    comfy_ckpt_name: str = "flux1-dev-fp8.safetensors"
+    comfy_timeout_seconds: float = 600.0
 
     strict_offline: bool = False
     require_auth_token: bool = False
