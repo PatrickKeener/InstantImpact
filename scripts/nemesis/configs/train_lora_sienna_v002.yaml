@@ -16,7 +16,8 @@ config:
   name: "ii_sienna_v002"
   process:
     - type: "sd_trainer"
-      training_folder: "/home/pkeener/InstantImpact/data/characters/7418d075-fc10-48b2-9723-c02d31b0d425/versions/v002/lora/toolkit_output"
+      # Must be writable by the user running train (pkeener). InstantImpact data/ is often root-owned.
+      training_folder: "/home/pkeener/lora-training/ii_sienna_v002"
       device: cuda:0
       trigger_word: "sks_sienna_v1"
       network:

@@ -223,33 +223,67 @@ async def register_lora(
         raise CharacterServiceError("No character version")
 
     layout = get_layout()
-    src = Path(source_path).expanduser()
+    src = Path(source_path).expanduser().resolve()
     if not src.is_file():
         # try under data/
         alt = _safe_data_path(source_path)
         if alt:
-            src = alt
+            src = alt.resolve()
     if not src.is_file():
-        raise CharacterServiceError(f"LoRA file not found: {source_path}", 404)
+        raise CharacterServiceError(
+            f"LoRA file not found or not readable: {source_path}", 404
+        )
     if src.suffix.lower() != ".safetensors":
         raise CharacterServiceError("LoRA must be a .safetensors file")
 
     lora_dir = layout.lora_dir(c.id, version.version_int)
-    lora_dir.mkdir(parents=True, exist_ok=True)
-    dest = lora_dir / "model.safetensors"
-    shutil.copy2(src, dest)
+    try:
+        lora_dir.mkdir(parents=True, exist_ok=True)
+    except PermissionError as e:
+        raise CharacterServiceError(
+            f"Cannot write to {lora_dir} (permission denied). "
+            f"chown the data/ tree to the API user. Detail: {e}",
+            500,
+        ) from e
+
+    dest = (lora_dir / "model.safetensors").resolve()
+    try:
+        # Already in the right place (common after manual cp) — do not shutil.copy2 same file
+        if src != dest:
+            shutil.copy2(src, dest)
+    except shutil.SameFileError:
+        pass
+    except PermissionError as e:
+        raise CharacterServiceError(
+            f"Cannot write LoRA to {dest}: {e}. Fix ownership or copy as the API user.",
+            500,
+        ) from e
 
     comfy_name = f"ii_{c.slug}_v{version.version_int:03d}.safetensors"
     comfy_installed = None
     settings = get_settings()
     if install_to_comfy:
         comfy_loras = Path(settings.comfy_loras_dir).expanduser()
-        comfy_loras.mkdir(parents=True, exist_ok=True)
-        target = comfy_loras / comfy_name
-        shutil.copy2(dest, target)
-        comfy_installed = str(target)
+        try:
+            comfy_loras.mkdir(parents=True, exist_ok=True)
+            target = comfy_loras / comfy_name
+            if dest != target.resolve():
+                shutil.copy2(dest, target)
+            comfy_installed = str(target)
+        except PermissionError as e:
+            raise CharacterServiceError(
+                f"Cannot install LoRA into Comfy folder {comfy_loras}: {e}. "
+                f"Set INSTANTIMPACT_COMFY_LORAS_DIR or chown that directory. "
+                f"Character path was saved; Comfy install failed.",
+                500,
+            ) from e
 
-    version.lora_path = str(dest.relative_to(layout.root)).replace("\\", "/")
+    try:
+        version.lora_path = str(dest.relative_to(layout.root)).replace("\\", "/")
+    except ValueError:
+        # dest outside data root — store absolute
+        version.lora_path = str(dest)
+
     params = dict(version.pipeline_params_json or {})
     flux = dict(params.get("flux") or {})
     flux["lora_strength"] = float(strength)
@@ -260,23 +294,30 @@ async def register_lora(
     # Ensure trigger in contract
     trigger = version.trigger_word or f"sks_{c.slug[:40]}_v{version.version_int}"
     version.trigger_word = trigger
-    version.prompt_contract_json = build_prompt_contract(
-        appearance=version.appearance_json or {},
-        boundaries=version.boundaries_json or {},
-        trigger_word=trigger,
-    ).model_dump()
+    try:
+        version.prompt_contract_json = build_prompt_contract(
+            appearance=version.appearance_json or {},
+            boundaries=version.boundaries_json or {},
+            trigger_word=trigger,
+        ).model_dump()
+    except Exception as e:
+        raise CharacterServiceError(f"Failed to rebuild prompt contract: {e}", 500) from e
 
-    write_json(
-        lora_dir / "register.json",
-        {
-            "registered_at": datetime.now(timezone.utc).isoformat(),
-            "source": str(src),
-            "comfy_lora_name": comfy_name,
-            "comfy_path": comfy_installed,
-            "strength": strength,
-            "trigger_word": trigger,
-        },
-    )
+    try:
+        write_json(
+            lora_dir / "register.json",
+            {
+                "registered_at": datetime.now(timezone.utc).isoformat(),
+                "source": str(src),
+                "comfy_lora_name": comfy_name,
+                "comfy_path": comfy_installed,
+                "strength": strength,
+                "trigger_word": trigger,
+            },
+        )
+    except PermissionError:
+        # Non-fatal — DB registration still proceeds
+        pass
 
     # Stay in training until human lock; if already ready, keep ready (retrain track)
     if c.status == CharacterStatus.TRAINING:
