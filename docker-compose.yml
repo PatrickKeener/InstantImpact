@@ -1,18 +1,22 @@
 # Optional Docker stack for InstantImpact app services (not ComfyUI).
 #
 # ComfyUI stays on the host (models + GPU already set up at ~/ComfyUI).
-# Worker/API use host network so they can reach Comfy on 127.0.0.1:8188.
+# Worker/API use host network so they can reach Comfy on 127.0.0.1:8188
+# and the host Redis already listening on 127.0.0.1:6379 (nemesis default).
 #
 # Usage:
 #   cp .env.nemesis.example .env   # set API token
-#   docker compose up -d --build
+#   docker compose up -d --build   # API + worker + web; uses HOST redis
 #   docker compose down
 #
+# If you do not have Redis on the host:
+#   docker compose --profile bundled-redis up -d --build
+#
 # Prefer scripts/nemesis/up.sh on a working native install — faster and reuses .venv.
-# This compose is for isolation / clean teardown of API+worker+web+redis only.
 
 services:
   redis:
+    profiles: ["bundled-redis"]
     image: redis:7-alpine
     container_name: instantimpact-redis
     restart: unless-stopped
@@ -40,8 +44,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./workflows:/app/workflows:ro
-    depends_on:
-      - redis
 
   worker:
     build:
@@ -65,7 +67,6 @@ services:
       - ./data:/app/data
       - ./workflows:/app/workflows:ro
     depends_on:
-      - redis
       - api
 
   web:

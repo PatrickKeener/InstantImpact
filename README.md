@@ -39,7 +39,7 @@ bash scripts/ii stop                # when done
 ```
 
 No multi-terminal setup. Details: [`scripts/nemesis/README.md`](scripts/nemesis/README.md).  
-Optional Docker (app only): `docker compose up -d` / `docker compose down`.
+Optional Docker (app only, uses host Redis): `docker compose up -d` / `docker compose down`.
 
 ## Quick start (on nemesis)
 

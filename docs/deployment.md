@@ -21,7 +21,7 @@ chmod +x scripts/nemesis/*.sh
 
 Logs: `.run/logs/`. See `scripts/nemesis/README.md`.
 
-Optional **Docker Compose** for API/worker/web/redis only (`docker compose up -d` / `down`). Comfy stays native on the host.
+Optional **Docker Compose** for API/worker/web only (`docker compose up -d` / `down`). Uses **host Redis** on `127.0.0.1:6379` (already running on nemesis). Do not start a second Redis on that port. Comfy stays native on the host. If you have no host Redis: `docker compose --profile bundled-redis up -d`.
 
 ---
 
