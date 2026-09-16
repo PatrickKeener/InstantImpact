@@ -19,9 +19,11 @@ export default function Dashboard() {
         setGpu(
           g.mock_generation
             ? "Mock generation ON (no ComfyUI required)"
-            : g.comfy_enabled
-              ? "ComfyUI mode"
-              : g.message
+            : g.comfy_healthy === false
+              ? "ComfyUI down — start it on :8188"
+              : g.comfy_enabled
+                ? "ComfyUI mode"
+                : g.message
         );
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -52,14 +54,35 @@ export default function Dashboard() {
         </div>
       )}
 
+      {health?.comfy_healthy === false && (
+        <div className="card border-amber-500/30 bg-amber-950/30 p-4 text-sm text-amber-100">
+          ComfyUI is not reachable at <code className="text-amber-50">127.0.0.1:8188</code>. Docker
+          Compose does not start it. On nemesis:
+          <pre className="mt-2 overflow-x-auto rounded-lg bg-black/30 p-3 text-xs text-amber-50">
+            {`curl -sS http://127.0.0.1:8188/system_stats
+docker stop vllm 2>/dev/null
+bash scripts/ii start --stop-vllm`}
+          </pre>
+          Then refresh this page. Health should read <strong>ok</strong> and comfy <strong>ok</strong>.
+        </div>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="card p-5">
           <div className="text-xs uppercase tracking-wide text-slate-500">Health</div>
-          <div className="mt-2 text-2xl font-semibold text-emerald-400">
+          <div
+            className={`mt-2 text-2xl font-semibold ${
+              health?.status === "ok"
+                ? "text-emerald-400"
+                : health?.status === "degraded"
+                  ? "text-amber-300"
+                  : "text-slate-300"
+            }`}
+          >
             {health?.status || "—"}
           </div>
           <div className="mt-1 text-xs text-slate-500">
-            redis {health?.redis_ok ? "ok" : "—"} · comfy{" "}
+            redis {health?.redis_ok ? "ok" : "down"} · comfy{" "}
             {health?.comfy_healthy === true ? "ok" : health?.comfy_healthy === false ? "down" : "n/a"}
             {health?.disk_free_gb != null ? ` · ${health.disk_free_gb} GB free` : ""}
           </div>
@@ -72,7 +95,13 @@ export default function Dashboard() {
         <div className="card p-5">
           <div className="text-xs uppercase tracking-wide text-slate-500">GPU / gen</div>
           <div className="mt-2 text-sm font-medium text-accent-soft">{gpu}</div>
-          <div className="mt-1 text-xs text-slate-500">L40S path · mock until Comfy pinned</div>
+          <div className="mt-1 text-xs text-slate-500">
+            {health?.comfy_healthy === true
+              ? "L40S · Flux stills"
+              : health?.comfy_healthy === false
+                ? "Comfy required for real stills"
+                : "L40S path"}
+          </div>
         </div>
       </div>
 
