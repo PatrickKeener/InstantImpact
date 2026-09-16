@@ -79,8 +79,9 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      # preview server; Dockerfile CMD uses host 0.0.0.0 port 5173
       PORT: "5173"
+      VITE_API_PROXY: http://127.0.0.1:${INSTANTIMPACT_PORT:-8001}
+      INSTANTIMPACT_PORT: ${INSTANTIMPACT_PORT:-8001}
     depends_on:
       - api
 

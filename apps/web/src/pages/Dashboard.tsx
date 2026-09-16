@@ -41,9 +41,14 @@ export default function Dashboard() {
 
       {error && (
         <div className="card border-red-500/30 bg-red-950/30 p-4 text-sm text-red-200">
-          API unreachable: {error}. Start the API with{" "}
-          <code className="text-red-100">scripts/dev_up.ps1</code> or{" "}
-          <code className="text-red-100">uvicorn</code>.
+          <div>API unreachable: {error}</div>
+          <p className="mt-2 text-xs text-red-200/80">
+            On nemesis the API is usually <code>:8001</code> (vLLM often owns <code>:8000</code>).
+            Restart web after the API is up, or set{" "}
+            <code>VITE_API_PROXY=http://127.0.0.1:8001</code>. Native:{" "}
+            <code>bash scripts/ii start --stop-vllm</code>. Docker:{" "}
+            <code>docker compose up -d api worker web</code> (host Redis, not a second Redis).
+          </p>
         </div>
       )}
 

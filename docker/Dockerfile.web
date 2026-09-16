@@ -16,8 +16,7 @@ WORKDIR /web
 COPY --from=build /web /web
 ENV HOST=0.0.0.0
 ENV PORT=5173
+# Runtime proxy target (vite.config.ts reads this). Nemesis API is 8001.
+ENV VITE_API_PROXY=http://127.0.0.1:8001
 EXPOSE 5173
-# Serve built assets; API calls go to same-origin /api if you put a reverse proxy in front.
-# For LAN MVP, point browser at host API via VITE build proxy is not used in preview —
-# use scripts/nemesis for dev proxy, or set public API URL later.
 CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "5173"]
