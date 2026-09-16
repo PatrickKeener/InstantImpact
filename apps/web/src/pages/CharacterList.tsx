@@ -27,7 +27,7 @@ export default function CharacterList() {
     setBusy(true);
     setError(null);
     try {
-      const c = await api.createRandomCharacter({ auto_attest: true, auto_bootstrap: true });
+      const c = await api.createRandomCharacter({ auto_attest: false, auto_bootstrap: false });
       setChars((prev) => [c, ...prev]);
       nav(`/characters/${c.id}`);
     } catch (e) {
@@ -63,7 +63,17 @@ export default function CharacterList() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         {chars.map((c) => (
-          <div key={c.id} className="card p-5">
+          <div key={c.id} className="card overflow-hidden">
+            {c.preview_thumb ? (
+              <img
+                src={api.mediaUrl(c.preview_thumb)}
+                alt=""
+                className="aspect-[5/2] w-full object-cover"
+              />
+            ) : (
+              <div className="aspect-[5/2] bg-ink-800" />
+            )}
+            <div className="p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold">{c.display_name}</h2>
@@ -88,6 +98,7 @@ export default function CharacterList() {
               <Link to={`/characters/${c.id}/studio`} className="btn-primary text-xs">
                 Studio
               </Link>
+            </div>
             </div>
           </div>
         ))}

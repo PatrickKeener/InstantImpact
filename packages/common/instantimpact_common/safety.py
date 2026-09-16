@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 from instantimpact_common.safety_lists import DENY_CATEGORIES
 
@@ -19,13 +20,26 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.lower()).strip()
 
 
+@lru_cache(maxsize=256)
+def _term_pattern(term: str) -> re.Pattern[str]:
+    """Word-boundary for single tokens; phrase match for multi-word terms.
+
+    Avoids false positives like 'kid' in 'kidney'.
+    """
+    term = term.strip().lower()
+    if " " in term:
+        inner = re.escape(term).replace(r"\ ", r"[\s\-]+")
+        return re.compile(rf"(?<![a-z0-9]){inner}(?![a-z0-9])")
+    return re.compile(rf"\b{re.escape(term)}\b")
+
+
 def scan_text(text: str) -> SafetyResult:
     if not text:
         return SafetyResult(ok=True)
     normalized = _normalize(text)
     for category, terms in DENY_CATEGORIES.items():
         for term in terms:
-            if term in normalized:
+            if _term_pattern(term).search(normalized):
                 return SafetyResult(
                     ok=False,
                     reasons=[f"Blocked term '{term}' in category '{category}'"],
@@ -51,9 +65,6 @@ def validate_character_for_generation(
         reasons.append("not_real_person_attested required")
     if status == "archived":
         reasons.append("archived characters cannot generate")
-    if status == "draft":
-        # seed_gallery allowed after safety flags; other jobs blocked at service layer
-        pass
 
     for t in texts or []:
         scan = scan_text(t)
@@ -97,13 +108,11 @@ def validate_for_enqueue(
     if job_type.startswith("video") and not video_enabled:
         reasons.append("video generation is not enabled in MVP")
 
-    # Scan brief/theme text
     for t in texts or []:
         scan = scan_text(t)
         if not scan.ok:
             reasons.extend(scan.reasons)
 
-    # de-dupe
     uniq: list[str] = []
     for r in reasons:
         if r not in uniq:

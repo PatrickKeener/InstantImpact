@@ -63,7 +63,9 @@ export default function CharacterWizard() {
     synthetic: false,
     notReal: false,
     text: "",
+    dryRun: false,
   });
+  const [hasLora, setHasLora] = useState(false);
 
   useEffect(() => {
     if (isNew) return;
@@ -71,6 +73,7 @@ export default function CharacterWizard() {
       .getCharacter(id!)
       .then((c) => {
         setCharacter(c);
+        api.loraStatus(c.id).then((l) => setHasLora(Boolean(l.lora_file_present))).catch(() => undefined);
         const v = c.current_version;
         const a = (v?.appearance || {}) as Record<string, string | string[]>;
         const p = (v?.personality || {}) as Record<string, string | string[]>;
@@ -208,6 +211,7 @@ export default function CharacterWizard() {
         confirm_adult: lockChecks.adult,
         confirm_synthetic: lockChecks.synthetic,
         confirm_not_real_person: lockChecks.notReal,
+        allow_without_lora: lockChecks.dryRun,
       });
       setCharacter(r.character);
     } catch (err) {
@@ -589,9 +593,15 @@ export default function CharacterWizard() {
                   </button>
                 </div>
                 <p className="text-xs text-slate-500">
-                  Bootstrap unlocks seed gallery & still batches (Unlocked banner). Full production
-                  lock requires LoRA + validation (checklist below for dry-run lock).
+                  Bootstrap unlocks seed gallery & still batches (Unlocked banner). Production lock
+                  requires a registered LoRA file unless you explicitly dry-run.
                 </p>
+                {!hasLora && (
+                  <p className="text-xs text-amber-200">
+                    No LoRA file on this version yet — register weights in Studio, or check dry-run
+                    below (identity will drift).
+                  </p>
+                )}
                 <div className="space-y-2 rounded-xl border border-white/10 p-3">
                   <label className="flex gap-2 text-sm">
                     <input
@@ -625,7 +635,20 @@ export default function CharacterWizard() {
                     value={lockChecks.text}
                     onChange={(e) => setLockChecks({ ...lockChecks, text: e.target.value })}
                   />
-                  <button type="button" className="btn-primary" disabled={busy} onClick={doLock}>
+                  <label className="flex gap-2 text-sm text-amber-200/90">
+                    <input
+                      type="checkbox"
+                      checked={lockChecks.dryRun}
+                      onChange={(e) => setLockChecks({ ...lockChecks, dryRun: e.target.checked })}
+                    />
+                    Dry-run lock without LoRA (not for production)
+                  </label>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={busy || (!hasLora && !lockChecks.dryRun)}
+                    onClick={doLock}
+                  >
                     Human lock → ready
                   </button>
                 </div>

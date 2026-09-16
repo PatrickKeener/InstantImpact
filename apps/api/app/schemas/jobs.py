@@ -19,6 +19,7 @@ class StillBatchRequest(BaseModel):
     aspect_ratio: str = "4:5"
     seed_policy: str = "random"
     title: str | None = None
+    seed: int | None = Field(default=None, description="If set, first unit uses this seed")
 
 
 class ContentBriefCreate(BaseModel):
@@ -83,6 +84,7 @@ class AssetOut(BaseModel):
     height: int | None
     seed: int | None
     prompt_positive: str | None
+    prompt_negative: str | None = None
     decision: str
     consistency_score: float | None
     meta: dict[str, Any]
@@ -127,3 +129,38 @@ class GpuStatusOut(BaseModel):
     mock_generation: bool = True
     comfy_enabled: bool = False
     comfy_healthy: bool | None = None
+    redis_ok: bool | None = None
+
+
+class RegenerateAssetRequest(BaseModel):
+    count: int = Field(default=1, ge=1, le=8)
+
+
+class ApprovedSetCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    asset_ids: list[str] = Field(min_length=1)
+
+
+class ApprovedSetExportRequest(BaseModel):
+    confirm_adult_synthetic: bool = False
+
+
+class ApprovedSetItemOut(BaseModel):
+    asset_id: str
+    position: int
+    path: str | None = None
+    thumb_path: str | None = None
+
+
+class ApprovedSetOut(BaseModel):
+    id: str
+    character_id: str
+    title: str
+    manifest_path: str | None = None
+    export_path: str | None = None
+    human_export_approved_at: datetime | None = None
+    created_at: datetime
+    item_count: int = 0
+    items: list[ApprovedSetItemOut] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}

@@ -59,7 +59,7 @@ npm install
 npm run dev
 ```
 
-Open **http://10.10.101.150:5173** (from chamber or any LAN client), or localhost on nemesis.
+Open **http://127.0.0.1:5173** locally. Vite proxies `/api` to **port 8000** by default (`VITE_API_PROXY` overrides; nemesis `up.sh` sets 8001).
 
 Or run `.\scripts\dev_up.ps1` for setup hints.
 

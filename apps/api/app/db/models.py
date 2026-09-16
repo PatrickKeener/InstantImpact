@@ -189,6 +189,7 @@ class ApprovedSet(Base):
     character_id: Mapped[str] = mapped_column(String(36), index=True)
     title: Mapped[str] = mapped_column(String(200))
     manifest_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    export_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     human_export_approved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

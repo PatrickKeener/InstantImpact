@@ -7,6 +7,14 @@ import time
 from typing import Any
 
 
+def _as_str(val: Any) -> str | None:
+    if val is None:
+        return None
+    if isinstance(val, bytes):
+        return val.decode()
+    return str(val)
+
+
 class GpuLock:
     KEY = "instantimpact:gpu"
 
@@ -30,8 +38,8 @@ class GpuLock:
         try:
             while True:
                 await asyncio.sleep(self.ttl / 3)
-                val = await self.redis.get(self.KEY)
-                if val and val.decode() == self.holder_id:
+                val = _as_str(await self.redis.get(self.KEY))
+                if val == self.holder_id:
                     await self.redis.expire(self.KEY, self.ttl)
                 else:
                     break
@@ -45,8 +53,8 @@ class GpuLock:
                 await self._heartbeat_task
             except asyncio.CancelledError:
                 pass
-        val = await self.redis.get(self.KEY)
-        if val and val.decode() == self.holder_id:
+        val = _as_str(await self.redis.get(self.KEY))
+        if val == self.holder_id:
             await self.redis.delete(self.KEY)
 
 

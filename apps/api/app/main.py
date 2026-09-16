@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import logging
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-import sys
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,13 +27,15 @@ from app.db.session import init_db
 from app.routers import characters, jobs, system
 from app.services.storage import get_layout
 
+log = logging.getLogger("instantimpact.api")
+
 
 class ApiTokenMiddleware(BaseHTTPMiddleware):
     """Optional bearer/token gate when LAN-exposed (adult library)."""
 
     async def dispatch(self, request: Request, call_next):
         settings = get_settings()
-        if not settings.require_auth_token or not settings.api_token:
+        if not settings.auth_is_required():
             return await call_next(request)
 
         path = request.url.path
@@ -54,8 +57,16 @@ class ApiTokenMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings = get_settings()
     get_layout()  # bootstrap data dirs
     await init_db()
+    if settings.bind_is_public() and not settings.api_token:
+        log.warning(
+            "LAN bind (%s) without INSTANTIMPACT_API_TOKEN — adult library is unauthenticated",
+            settings.host,
+        )
+    if settings.strict_offline:
+        log.info("STRICT_OFFLINE enabled — non-loopback HTTP is blocked")
     from app.services.job_events import start_job_event_consumer, stop_job_event_consumer
 
     start_job_event_consumer()
@@ -65,36 +76,42 @@ async def lifespan(app: FastAPI):
         await stop_job_event_consumer()
 
 
-app = FastAPI(
-    title="InstantImpact",
-    description="Local AI Persona Content Studio",
-    version="0.1.0",
-    lifespan=lifespan,
-)
+def create_app() -> FastAPI:
+    """Factory so tests can rebuild the app after env/settings changes."""
+    application = FastAPI(
+        title="InstantImpact",
+        description="Local AI Persona Content Studio",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
 
-_settings = get_settings()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_settings.cors_origin_list(),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-app.add_middleware(ApiTokenMiddleware)
+    settings = get_settings()
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list(),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    application.add_middleware(ApiTokenMiddleware)
 
-app.include_router(system.router)
-app.include_router(characters.router)
-app.include_router(jobs.router)
+    application.include_router(system.router)
+    application.include_router(characters.router)
+    application.include_router(jobs.router)
+
+    @application.get("/")
+    async def root():
+        s = get_settings()
+        return {
+            "app": "InstantImpact",
+            "node": s.node_name,
+            "role": s.node_role,
+            "docs": "/docs",
+            "health": "/api/system/health",
+            "topology": "/api/system/topology",
+        }
+
+    return application
 
 
-@app.get("/")
-async def root():
-    s = get_settings()
-    return {
-        "app": "InstantImpact",
-        "node": s.node_name,
-        "role": s.node_role,
-        "docs": "/docs",
-        "health": "/api/system/health",
-        "topology": "/api/system/topology",
-    }
+app = create_app()

@@ -824,7 +824,7 @@ Enforcement points: character save (partial), brief validate, **prompt compile**
 
 ### 8. API / Interface design (MVP)
 
-Base: `http://127.0.0.1:8000/api/v1`
+Base: `http://127.0.0.1:8000/api` (no `/v1` prefix — freeze this)
 
 | Method | Path | Purpose |
 |--------|------|---------|

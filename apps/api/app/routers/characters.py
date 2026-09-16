@@ -63,7 +63,7 @@ async def create_random_character(
 async def get_character(character_id: str, db: AsyncSession = Depends(get_db)):
     try:
         c = await svc.get_character(db, character_id)
-        return svc.character_to_out(c)
+        return await svc.character_to_out_with_thumb(db, c)
     except svc.CharacterServiceError as e:
         raise _err(e) from e
 

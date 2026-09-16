@@ -91,9 +91,11 @@ Open from any LAN machine:
 
 - Bind API/web to `0.0.0.0` only on trusted VLAN `10.10.x.x`.
 - Set `INSTANTIMPACT_REQUIRE_AUTH_TOKEN=true` and a long `INSTANTIMPACT_API_TOKEN`.
-- Web UI: after open, once in browser console:
+- Web UI: click **token** in the header and save, or once in the browser console:
   `localStorage.setItem('instantimpact_api_token', '<secret>')`
   or start Vite with `VITE_API_TOKEN=<secret>`.
+- Binding `0.0.0.0` with a token configured **auto-enables** auth even if `REQUIRE_AUTH_TOKEN` is false.
+- Native Vite default proxy is port **8000**. Nemesis `up.sh` sets `VITE_API_PROXY` to the API port (8001 when vLLM owns 8000).
 - Keep **ComfyUI on `127.0.0.1`** so only the local worker can reach it.
 - Keep **Redis on `127.0.0.1`** unless you later split hosts.
 

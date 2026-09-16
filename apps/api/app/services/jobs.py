@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 import random
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from fastapi import BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -19,6 +21,8 @@ from instantimpact_common.enums import CharacterStatus, JobItemStatus, JobStatus
 from instantimpact_common.safety import validate_for_enqueue
 from instantimpact_common.schemas import BriefItem, JobRequestSnapshot, StillUnitRequest
 from instantimpact_prompts.render_flux import render_flux_prompts
+
+log = logging.getLogger("instantimpact.jobs")
 
 
 class JobServiceError(Exception):
@@ -113,6 +117,7 @@ async def _enqueue(
     brief_id: str | None = None,
     aspect_ratio: str = "4:5",
     seed_policy: str = "random",
+    background_tasks: BackgroundTasks | None = None,
 ) -> Job:
     settings = get_settings()
     c = await char_svc.get_character(db, character_id)
@@ -140,10 +145,12 @@ async def _enqueue(
     if not safety.ok:
         raise JobServiceError("; ".join(safety.reasons))
 
-    # Assign seeds
+    # Assign seeds (keep any seed already set, e.g. regenerate)
     base_seed = random.randint(1, 2**31 - 1)
     for i, u in enumerate(units):
         u.aspect_ratio = aspect_ratio
+        if u.seed is not None:
+            continue
         if seed_policy == "fixed_base":
             u.seed = base_seed + i
         else:
@@ -203,15 +210,18 @@ async def _enqueue(
     await db.commit()
     job = await get_job(db, job.id)
 
-    # Mock: API is the sole SQLite writer and materializes placeholder stills here.
-    # (Worker mock only emits Redis progress events; it does not write assets.)
-    # Real Comfy jobs: enqueue to ARQ for the GPU worker.
-    if snapshot.mock:
-        await run_mock_job(db, job.id)
-    else:
-        try:
-            await _try_arq_enqueue(job.id, str(request_path), job_type)
-        except Exception as e:
+    # Prefer ARQ (worker writes files + Redis events). Mock without Redis uses a
+    # FastAPI BackgroundTask so the HTTP response is not blocked.
+    try:
+        await _try_arq_enqueue(job.id, str(request_path), job_type)
+    except Exception as e:
+        if snapshot.mock:
+            log.info("ARQ unavailable (%s) — running mock in background", e)
+            if background_tasks is not None:
+                background_tasks.add_task(_run_mock_isolated, job.id)
+            else:
+                await run_mock_job(db, job.id)
+        else:
             job = await get_job(db, job.id)
             job.status = JobStatus.FAILED
             job.error_message = f"Failed to enqueue job: {e}"
@@ -219,6 +229,17 @@ async def _enqueue(
             await db.commit()
 
     return await get_job(db, job.id)
+
+
+async def _run_mock_isolated(job_id: str) -> None:
+    from app.db.session import get_session_factory
+
+    factory = get_session_factory()
+    async with factory() as session:
+        try:
+            await run_mock_job(session, job_id)
+        except Exception:
+            log.exception("Isolated mock job failed: %s", job_id)
 
 
 async def _try_arq_enqueue(job_id: str, request_path: str, job_type: str) -> None:
@@ -243,7 +264,10 @@ async def _try_arq_enqueue(job_id: str, request_path: str, job_type: str) -> Non
 
 
 async def enqueue_seed_gallery(
-    db: AsyncSession, character_id: str, payload: SeedGalleryRequest
+    db: AsyncSession,
+    character_id: str,
+    payload: SeedGalleryRequest,
+    background_tasks: BackgroundTasks | None = None,
 ) -> dict:
     themes = payload.themes or ["portrait"]
     units: list[StillUnitRequest] = []
@@ -261,14 +285,23 @@ async def enqueue_seed_gallery(
         character_id=character_id,
         units=units,
         aspect_ratio=payload.aspect_ratio,
+        background_tasks=background_tasks,
     )
     return job_to_out(job)
 
 
 async def enqueue_still_batch(
-    db: AsyncSession, character_id: str, payload: StillBatchRequest
+    db: AsyncSession,
+    character_id: str,
+    payload: StillBatchRequest,
+    background_tasks: BackgroundTasks | None = None,
 ) -> dict:
     units = _expand_brief_items(payload.items)
+    if payload.seed is not None and units:
+        units[0].seed = int(payload.seed)
+        for i, u in enumerate(units[1:], start=1):
+            if payload.seed_policy == "fixed_base":
+                u.seed = int(payload.seed) + i
     brief_id = None
     if payload.title:
         brief = ContentBrief(
@@ -290,6 +323,52 @@ async def enqueue_still_batch(
         brief_id=brief_id,
         aspect_ratio=payload.aspect_ratio,
         seed_policy=payload.seed_policy,
+        background_tasks=background_tasks,
+    )
+    return job_to_out(job)
+
+
+async def enqueue_regenerate(
+    db: AsyncSession,
+    character_id: str,
+    asset_id: str,
+    *,
+    count: int = 1,
+    background_tasks: BackgroundTasks | None = None,
+) -> dict:
+    """Re-run a still using the original brief hints; count=1 reuses the seed."""
+    q = await db.execute(select(Asset).where(Asset.id == asset_id))
+    asset = q.scalar_one_or_none()
+    if not asset or asset.character_id != character_id:
+        raise JobServiceError("Asset not found", 404)
+    req: dict[str, Any] = {}
+    if asset.job_item_id:
+        iq = await db.execute(select(JobItem).where(JobItem.id == asset.job_item_id))
+        item = iq.scalar_one_or_none()
+        if item:
+            req = item.request_json or {}
+    units: list[StillUnitRequest] = []
+    for i in range(count):
+        units.append(
+            StillUnitRequest(
+                item_index=i,
+                seed=asset.seed if i == 0 else None,
+                theme=req.get("theme") or "portrait",
+                outfit_hint=req.get("outfit_hint"),
+                pose_hint=req.get("pose_hint"),
+                location_hint=req.get("location_hint"),
+                extra_prompt=req.get("extra_prompt"),
+                aspect_ratio=req.get("aspect_ratio") or "4:5",
+            )
+        )
+    job = await _enqueue(
+        db,
+        job_type=JobType.STILL_BATCH,
+        character_id=character_id,
+        units=units,
+        aspect_ratio=req.get("aspect_ratio") or "4:5",
+        seed_policy="random",
+        background_tasks=background_tasks,
     )
     return job_to_out(job)
 
@@ -347,6 +426,7 @@ async def list_assets(db: AsyncSession, character_id: str, decision: str | None 
             "height": a.height,
             "seed": a.seed,
             "prompt_positive": a.prompt_positive,
+            "prompt_negative": a.prompt_negative,
             "decision": a.decision,
             "consistency_score": a.consistency_score,
             "meta": a.meta_json or {},
@@ -504,6 +584,18 @@ async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
             await db.commit()
         return
 
+    if name == "item_started":
+        idx = event.get("item_index")
+        for item in job.items:
+            if item.item_index == idx and item.status == JobItemStatus.PENDING:
+                item.status = JobItemStatus.RUNNING
+                break
+        if job.status == JobStatus.QUEUED:
+            job.status = JobStatus.RUNNING
+            job.started_at = job.started_at or datetime.now(timezone.utc)
+        await db.commit()
+        return
+
     if name == "cancelled":
         job.status = JobStatus.CANCELLED
         job.finished_at = datetime.now(timezone.utc)
@@ -532,9 +624,9 @@ async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
         return
 
     if name == "item_done":
-        # Mock worker events have no path — ignore (API mock runner owns mock assets)
         path = event.get("path")
         if not path:
+            # Progress tick without a file (legacy mock) — ignore
             return
         idx = event.get("item_index")
         item = next((i for i in job.items if i.item_index == idx), None)
@@ -570,10 +662,12 @@ async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
             pipeline=event.get("pipeline") or "flux",
             meta_json=meta,
             decision="pending",
+            consistency_score=event.get("consistency_score"),
         )
         db.add(asset)
         item.status = JobItemStatus.DONE
         item.asset_id = asset_id
+        item.consistency_score = event.get("consistency_score")
         if job.status == JobStatus.QUEUED:
             job.status = JobStatus.RUNNING
             job.started_at = job.started_at or datetime.now(timezone.utc)

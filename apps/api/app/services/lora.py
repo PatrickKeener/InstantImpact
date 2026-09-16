@@ -225,7 +225,6 @@ async def register_lora(
     layout = get_layout()
     src = Path(source_path).expanduser().resolve()
     if not src.is_file():
-        # try under data/
         alt = _safe_data_path(source_path)
         if alt:
             src = alt.resolve()
@@ -235,6 +234,24 @@ async def register_lora(
         )
     if src.suffix.lower() != ".safetensors":
         raise CharacterServiceError("LoRA must be a .safetensors file")
+    allowed_roots = [layout.root.resolve()]
+    comfy_loras = Path(get_settings().comfy_loras_dir).expanduser()
+    try:
+        allowed_roots.append(comfy_loras.resolve())
+    except Exception:
+        pass
+    allowed = False
+    for root in allowed_roots:
+        try:
+            src.relative_to(root)
+            allowed = True
+            break
+        except ValueError:
+            continue
+    if not allowed:
+        raise CharacterServiceError(
+            "LoRA source must be under data/ or INSTANTIMPACT_COMFY_LORAS_DIR"
+        )
 
     lora_dir = layout.lora_dir(c.id, version.version_int)
     try:
@@ -379,6 +396,23 @@ async def lora_status(db: AsyncSession, character_id: str) -> dict[str, Any]:
         comfy_lora = flux.get("comfy_lora_name")
 
     n_approved = len(approved)
+    coverage_keys = [
+        "portrait",
+        "casual_bedroom",
+        "lingerie_set",
+        "outdoor_day",
+        "glamour",
+        "mirror_selfie",
+        "gym",
+    ]
+    coverage: dict[str, bool] = {k: False for k in coverage_keys}
+    for a in approved:
+        pos = (a.prompt_positive or "").lower()
+        for k in coverage_keys:
+            token = k.replace("_", " ")
+            if k in pos or token in pos or k.split("_")[0] in pos:
+                coverage[k] = True
+    missing = [k for k, ok in coverage.items() if not ok]
     return {
         "character_id": character_id,
         "status": c.status,
@@ -393,4 +427,6 @@ async def lora_status(db: AsyncSession, character_id: str) -> dict[str, Any]:
         "version_int": version.version_int if version else None,
         "ready_for_dataset": n_approved >= MIN_IMAGES_HARD,
         "recommended_min": 12,
+        "coverage": coverage,
+        "coverage_missing": missing,
     }

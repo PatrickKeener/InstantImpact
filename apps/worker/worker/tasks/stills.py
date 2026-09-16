@@ -47,8 +47,14 @@ async def process_still_job(
         return {"ok": False}
 
     snapshot = json.loads(path.read_text(encoding="utf-8"))
+    is_mock = bool(snapshot.get("mock", True))
+
+    if is_mock:
+        await _publish(redis, {"job_id": job_id, "event": "running", "message": "mock generation"})
+        return await _run_mock(redis, snapshot, request_path=path)
+
     lock = GpuLock(redis, holder_id=job_id)
-    acquired = await lock.acquire(timeout=10.0)
+    acquired = await lock.acquire(timeout=3600.0)
     if not acquired:
         await _publish(
             redis,
@@ -56,45 +62,141 @@ async def process_still_job(
                 "job_id": job_id,
                 "event": "failed",
                 "error_code": "gpu_busy",
-                "message": "Could not acquire GPU lock",
+                "message": "Could not acquire GPU lock within 1 hour",
             },
         )
         return {"ok": False}
 
     try:
         await _publish(redis, {"job_id": job_id, "event": "running", "message": "GPU acquired"})
-        if snapshot.get("mock", True):
-            result = await _run_mock(redis, snapshot)
-        else:
-            result = await _run_comfy(redis, snapshot, request_path=path)
-        return result
+        return await _run_comfy(redis, snapshot, request_path=path)
     finally:
         await lock.release()
 
 
-async def _run_mock(redis: Any, snapshot: dict) -> dict:
+def _refs_dir(snapshot: dict, data_dir: Path) -> Path | None:
+    raw = snapshot.get("ref_pack_path")
+    if not raw:
+        return None
+    p = Path(str(raw))
+    if not p.is_absolute():
+        p = data_dir / str(raw).replace("\\", "/").lstrip("/")
+    return p if p.is_dir() else None
+
+
+def _score_against_refs(still_path: Path, refs: Path | None) -> float | None:
+    try:
+        from instantimpact_common.similarity import best_ref_similarity
+
+        return best_ref_similarity(still_path, refs)
+    except Exception:
+        return None
+
+
+async def _run_mock(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
+    """Write placeholder stills + publish item_done with paths (API is still the DB writer)."""
+    from instantimpact_common.safety_lists import SYNTHETIC_DISCLOSURE_DEFAULT
+    from instantimpact_prompts.render_flux import render_flux_prompts
+
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        await _publish(
+            redis,
+            {
+                "job_id": snapshot["job_id"],
+                "event": "failed",
+                "error_code": "missing_pillow",
+                "message": "Pillow is required for mock stills",
+            },
+        )
+        return {"ok": False}
+
     job_id = snapshot["job_id"]
+    character_id = snapshot.get("character_id") or "unknown"
     items = snapshot.get("items") or []
+    data_dir = _resolve_data_dir(request_path)
+    out_dir = data_dir / "outputs" / character_id / job_id / "stills"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    contract = snapshot.get("prompt_contract") or {}
+    refs = _refs_dir(snapshot, data_dir)
+
     for item in items:
         if await is_cancel_requested(redis, job_id):
             await _publish(redis, {"job_id": job_id, "event": "cancelled"})
             return {"ok": False, "cancelled": True}
+
+        item_index = int(item.get("item_index") or 0)
+        await _publish(
+            redis,
+            {"job_id": job_id, "event": "item_started", "item_index": item_index},
+        )
+        theme = item.get("theme") or "portrait"
+        seed = int(item.get("seed") or 0) or int(uuid.uuid4().int % (2**31 - 1))
+        positive, negative = render_flux_prompts(
+            contract,
+            theme=theme,
+            outfit_hint=item.get("outfit_hint"),
+            pose_hint=item.get("pose_hint"),
+            location_hint=item.get("location_hint"),
+            extra_prompt=item.get("extra_prompt"),
+        )
+        w, h = 768, 960
+        img = Image.new("RGB", (w, h), color=(36, 36, 48))
+        draw = ImageDraw.Draw(img)
+        draw.text((24, 24), f"MOCK STILL #{item_index}", fill=(220, 220, 230))
+        draw.text((24, 60), f"seed={seed}", fill=(180, 180, 200))
+        draw.text((24, 96), f"theme={theme}", fill=(180, 180, 200))
+        snippet = (positive[:180] + "…") if len(positive) > 180 else positive
+        draw.text((24, 140), snippet[:90], fill=(160, 160, 180))
+        draw.text((24, 164), snippet[90:180], fill=(160, 160, 180))
+        draw.text((24, h - 80), "SYNTHETIC · 21+", fill=(120, 200, 140))
+        draw.text((24, h - 50), "InstantImpact mock pipeline", fill=(120, 120, 140))
+
+        still_name = f"still_{item_index:03d}_s{seed}.png"
+        still_path = out_dir / still_name
+        img.save(still_path, "PNG")
+        thumb_path = out_dir / f"thumb_{item_index:03d}.png"
+        img.resize((192, 240)).save(thumb_path, "PNG")
+        digest = hashlib.sha256(still_path.read_bytes()).hexdigest()
+        rel_still = str(still_path.relative_to(data_dir)).replace("\\", "/")
+        rel_thumb = str(thumb_path.relative_to(data_dir)).replace("\\", "/")
+        disclosure = {
+            "synthetic": True,
+            "ai_generated": True,
+            "age_appearance": "21+",
+            "disclosure": SYNTHETIC_DISCLOSURE_DEFAULT,
+            "job_id": job_id,
+            "seed": seed,
+            "pipeline": "mock",
+        }
+        still_path.with_suffix(".disclosure.json").write_text(
+            json.dumps(disclosure, indent=2), encoding="utf-8"
+        )
+        score = _score_against_refs(still_path, refs)
         await _publish(
             redis,
             {
                 "job_id": job_id,
                 "event": "item_done",
-                "item_index": item.get("item_index"),
-                "message": "mock item (API may complete assets)",
+                "item_index": item_index,
+                "path": rel_still,
+                "thumb_path": rel_thumb,
+                "width": w,
+                "height": h,
+                "seed": seed,
+                "prompt_positive": positive,
+                "prompt_negative": negative,
+                "sha256": digest,
+                "pipeline": "mock",
+                "consistency_score": score,
+                "meta": disclosure,
             },
         )
+
     await _publish(
         redis,
-        {
-            "job_id": job_id,
-            "event": "completed",
-            "message": "worker mock pass — ensure API mock runner applied assets",
-        },
+        {"job_id": job_id, "event": "completed", "message": f"mock stills done ({len(items)})"},
     )
     return {"ok": True}
 
@@ -109,6 +211,7 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         validate_placeholders,
     )
     from instantimpact_comfy.client import ComfyClient, ComfyClientError
+    from instantimpact_common.offline import enforce_strict_offline
     from instantimpact_prompts.render_flux import render_flux_prompts
 
     job_id = snapshot["job_id"]
@@ -117,17 +220,34 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     contract = snapshot.get("prompt_contract") or {}
     pipeline_params = snapshot.get("pipeline_params") or {}
     flux_params = pipeline_params.get("flux") or pipeline_params
-    trigger = snapshot.get("trigger_word") or (contract.get("trigger_word") if isinstance(contract, dict) else None)
+    trigger = snapshot.get("trigger_word") or (
+        contract.get("trigger_word") if isinstance(contract, dict) else None
+    )
     lora_name = flux_params.get("comfy_lora_name") or None
-    lora_strength = float(flux_params.get("lora_strength") if flux_params.get("lora_strength") is not None else 0.85)
-    # Also accept bare lora_path basename if it ends with .safetensors and looks installed
+    lora_strength = float(
+        flux_params.get("lora_strength") if flux_params.get("lora_strength") is not None else 0.85
+    )
     if not lora_name and snapshot.get("lora_path"):
         lp = str(snapshot["lora_path"])
         if lp.endswith(".safetensors"):
-            # Prefer ii_* name from register; otherwise basename may not be in Comfy
-            pass
+            lora_name = Path(lp).name
 
     comfy_url = os.environ.get("INSTANTIMPACT_COMFY_URL", "http://127.0.0.1:8188")
+    strict = os.environ.get("INSTANTIMPACT_STRICT_OFFLINE", "").lower() in {"1", "true", "yes"}
+    try:
+        enforce_strict_offline(comfy_url, strict)
+    except RuntimeError as e:
+        await _publish(
+            redis,
+            {
+                "job_id": job_id,
+                "event": "failed",
+                "error_code": "strict_offline",
+                "message": str(e),
+            },
+        )
+        return {"ok": False}
+
     ckpt_name = os.environ.get("INSTANTIMPACT_COMFY_CKPT_NAME", "flux1-dev-fp8.safetensors")
     workflows_dir = Path(
         os.environ.get(
@@ -138,6 +258,7 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     data_dir = _resolve_data_dir(request_path)
     out_dir = data_dir / "outputs" / character_id / job_id / "stills"
     out_dir.mkdir(parents=True, exist_ok=True)
+    refs = _refs_dir(snapshot, data_dir)
 
     use_lora = bool(lora_name)
     wf_name = "flux_still_character_lora_v1.json" if use_lora else "flux_still_character_v1.json"
@@ -169,7 +290,9 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         )
         return {"ok": False}
 
-    client = ComfyClient(comfy_url, timeout=float(os.environ.get("INSTANTIMPACT_COMFY_TIMEOUT", "600")))
+    client = ComfyClient(
+        comfy_url, timeout=float(os.environ.get("INSTANTIMPACT_COMFY_TIMEOUT", "600"))
+    )
     if not await client.health():
         await _publish(
             redis,
@@ -182,10 +305,8 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         )
         return {"ok": False}
 
-    # Defaults tuned for flux1-dev-fp8 checkpoint (CFG ~1.0, more steps for detail)
     default_steps = int(flux_params.get("steps") or 28)
     default_cfg = float(flux_params.get("cfg") if flux_params.get("cfg") is not None else 1.0)
-    # FP8 checkpoint quality path: force cfg near 1 if someone left SD-like 3.5+
     if default_cfg > 2.0:
         default_cfg = 1.0
     if default_steps < 20:
@@ -205,6 +326,10 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             return {"ok": False, "cancelled": True}
 
         item_index = int(item.get("item_index") or 0)
+        await _publish(
+            redis,
+            {"job_id": job_id, "event": "item_started", "item_index": item_index},
+        )
         theme = item.get("theme") or "portrait"
         seed = int(item.get("seed") or 0) or int(uuid.uuid4().int % (2**31 - 1))
         aspect = item.get("aspect_ratio") or meta_aspect
@@ -218,10 +343,10 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             location_hint=item.get("location_hint"),
             extra_prompt=item.get("extra_prompt"),
         )
-        # Soft adult / synthetic bias for character stills (not a safety replacement)
         if "adult" not in positive.lower() and "21" not in positive:
-            positive = f"adult woman 25 years old, {positive}" if positive else "adult woman 25 years old"
-        # Ensure trigger token is present when using a character LoRA
+            positive = (
+                f"adult woman 25 years old, {positive}" if positive else "adult woman 25 years old"
+            )
         if trigger and trigger not in positive:
             positive = f"{trigger}, {positive}"
 
@@ -274,7 +399,6 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             else:
                 thumb_path.write_bytes(raw)
 
-            # paths relative to data/
             rel_still = str(still_path.relative_to(data_dir)).replace("\\", "/")
             rel_thumb = str(thumb_path.relative_to(data_dir)).replace("\\", "/")
 
@@ -287,10 +411,13 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
                 "ckpt": ckpt_name,
                 "job_id": job_id,
                 "seed": seed,
+                "lora_name": lora_name,
+                "ref_pack": str(refs) if refs else None,
             }
             still_path.with_suffix(".disclosure.json").write_text(
                 json.dumps(disclosure, indent=2), encoding="utf-8"
             )
+            score = _score_against_refs(still_path, refs)
 
             await _publish(
                 redis,
@@ -307,6 +434,7 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
                     "prompt_negative": negative,
                     "sha256": digest,
                     "pipeline": "flux",
+                    "consistency_score": score,
                     "meta": disclosure,
                 },
             )
@@ -362,8 +490,8 @@ def _resolve_data_dir(request_path: Path) -> Path:
     env = os.environ.get("INSTANTIMPACT_DATA_DIR")
     if env:
         return Path(env).resolve()
-    # request.json lives at data/jobs/{id}/request.json
-    return request_path.resolve().parents[1]
+    # request.json lives at data/jobs/{id}/request.json → parents[2] == data/
+    return request_path.resolve().parents[2]
 
 
 def _size_for_aspect(aspect: str, flux_params: dict) -> tuple[int, int]:

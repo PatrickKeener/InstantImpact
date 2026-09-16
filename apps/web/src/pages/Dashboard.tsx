@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, Character } from "../api";
+import { api, Character, Health } from "../api";
 
 export default function Dashboard() {
   const nav = useNavigate();
-  const [health, setHealth] = useState<Record<string, unknown> | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
   const [chars, setChars] = useState<Character[]>([]);
   const [gpu, setGpu] = useState<string>("…");
   const [error, setError] = useState<string | null>(null);
@@ -14,7 +14,7 @@ export default function Dashboard() {
     (async () => {
       try {
         const [h, c, g] = await Promise.all([api.health(), api.listCharacters(), api.gpu()]);
-        setHealth(h as unknown as Record<string, unknown>);
+        setHealth(h);
         setChars(c);
         setGpu(
           g.mock_generation
@@ -51,9 +51,13 @@ export default function Dashboard() {
         <div className="card p-5">
           <div className="text-xs uppercase tracking-wide text-slate-500">Health</div>
           <div className="mt-2 text-2xl font-semibold text-emerald-400">
-            {(health?.status as string) || "—"}
+            {health?.status || "—"}
           </div>
-          <div className="mt-1 text-xs text-slate-500">control plane (prefer nemesis)</div>
+          <div className="mt-1 text-xs text-slate-500">
+            redis {health?.redis_ok ? "ok" : "—"} · comfy{" "}
+            {health?.comfy_healthy === true ? "ok" : health?.comfy_healthy === false ? "down" : "n/a"}
+            {health?.disk_free_gb != null ? ` · ${health.disk_free_gb} GB free` : ""}
+          </div>
         </div>
         <div className="card p-5">
           <div className="text-xs uppercase tracking-wide text-slate-500">Characters</div>
@@ -79,7 +83,7 @@ export default function Dashboard() {
             setBusyRandom(true);
             setError(null);
             api
-              .createRandomCharacter({ auto_attest: true, auto_bootstrap: true })
+              .createRandomCharacter({ auto_attest: false, auto_bootstrap: false })
               .then((c) => nav(`/characters/${c.id}`))
               .catch((e) => setError(e instanceof Error ? e.message : String(e)))
               .finally(() => setBusyRandom(false));

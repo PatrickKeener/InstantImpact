@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Character, CharacterVersion
+from app.db.models import Asset, Character, CharacterVersion
 from app.schemas.characters import CharacterCreate, CharacterUpdate, LockCharacterRequest
 from app.services.storage import get_layout
 from instantimpact_common.enums import CharacterStatus, VersionStatus
@@ -90,6 +90,7 @@ def character_to_out(c: Character, version: CharacterVersion | None = None) -> d
         "created_at": c.created_at,
         "updated_at": c.updated_at,
         "current_version": version_to_dict(version) if version else None,
+        "preview_thumb": None,
     }
 
 
@@ -98,7 +99,42 @@ async def list_characters(db: AsyncSession, include_archived: bool = False) -> l
     if not include_archived:
         q = q.where(Character.status != CharacterStatus.ARCHIVED)
     rows = (await db.execute(q)).scalars().all()
-    return [character_to_out(c) for c in rows]
+    thumbs = await _preview_thumbs(db, [c.id for c in rows])
+    out = []
+    for c in rows:
+        d = character_to_out(c)
+        d["preview_thumb"] = thumbs.get(c.id)
+        out.append(d)
+    return out
+
+
+async def _preview_thumbs(db: AsyncSession, character_ids: list[str]) -> dict[str, str]:
+    if not character_ids:
+        return {}
+    q = (
+        select(Asset)
+        .where(Asset.character_id.in_(character_ids))
+        .where(Asset.kind == "still")
+        .where(Asset.decision == "approved")
+        .order_by(Asset.created_at.desc())
+    )
+    thumbs: dict[str, str] = {}
+    for a in (await db.execute(q)).scalars().all():
+        if a.character_id in thumbs:
+            continue
+        thumbs[a.character_id] = a.thumb_path or a.path
+    if len(thumbs) < len(character_ids):
+        q2 = (
+            select(Asset)
+            .where(Asset.character_id.in_(character_ids))
+            .where(Asset.kind == "still")
+            .order_by(Asset.created_at.desc())
+        )
+        for a in (await db.execute(q2)).scalars().all():
+            if a.character_id in thumbs:
+                continue
+            thumbs[a.character_id] = a.thumb_path or a.path
+    return thumbs
 
 
 async def get_character(db: AsyncSession, character_id: str) -> Character:
@@ -113,12 +149,19 @@ async def get_character(db: AsyncSession, character_id: str) -> Character:
     return c
 
 
+async def character_to_out_with_thumb(db: AsyncSession, c: Character) -> dict:
+    d = character_to_out(c)
+    thumbs = await _preview_thumbs(db, [c.id])
+    d["preview_thumb"] = thumbs.get(c.id)
+    return d
+
+
 async def create_random_character(
     db: AsyncSession,
     *,
     seed: int | None = None,
-    auto_attest: bool = True,
-    auto_bootstrap: bool = True,
+    auto_attest: bool = False,
+    auto_bootstrap: bool = False,
 ) -> dict:
     """Create a fully filled random adult synthetic persona."""
     from app.services.random_character import build_random_character_create
@@ -316,7 +359,15 @@ async def lock_character(db: AsyncSession, character_id: str, payload: LockChara
         raise CharacterServiceError("All lock checklist confirmations are required")
     if not c.synthetic_confirmed or c.age_appearance_min < 21:
         raise CharacterServiceError("Character safety flags incomplete")
-    # MVP: allow lock with or without real LoRA file for dry-run; warn via message if missing
+    lora_ok = False
+    if version.lora_path:
+        lp = get_layout().root / str(version.lora_path).replace("\\", "/")
+        lora_ok = lp.is_file()
+    if not lora_ok and not payload.allow_without_lora:
+        raise CharacterServiceError(
+            "Lock requires a registered LoRA file. Train and register weights, "
+            "or set allow_without_lora for a dry-run lock (identity will drift)."
+        )
     if c.locked_version_id and c.locked_version_id != version.id:
         old = next((v for v in c.versions if v.id == c.locked_version_id), None)
         if old:

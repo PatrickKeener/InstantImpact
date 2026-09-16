@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from typing import Any
 
 import httpx
+
+from instantimpact_common.offline import enforce_strict_offline
 
 
 class ComfyClientError(RuntimeError):
@@ -18,6 +21,8 @@ class ComfyClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.client_id = str(uuid.uuid4())
+        strict = os.environ.get("INSTANTIMPACT_STRICT_OFFLINE", "").lower() in {"1", "true", "yes"}
+        enforce_strict_offline(self.base_url, strict)
 
     async def health(self) -> bool:
         try:

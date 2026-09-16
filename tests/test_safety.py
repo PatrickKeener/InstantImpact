@@ -32,3 +32,18 @@ def test_still_batch_blocks_draft():
         not_real_person_attested=True,
     )
     assert not r.ok
+
+
+def test_kid_does_not_match_kidney():
+    r = scan_text("kidney beans in a lifestyle kitchen photo")
+    assert r.ok
+
+
+def test_teen_word_still_blocked():
+    r = scan_text("teen")
+    assert not r.ok
+
+
+def test_teenager_blocked():
+    r = scan_text("teenager")
+    assert not r.ok

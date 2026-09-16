@@ -27,6 +27,7 @@ dev = [
   "pytest-asyncio>=0.24.0",
   "ruff>=0.7.0",
   "httpx>=0.27.0",
+  "alembic>=1.14.0",
 ]
 
 [build-system]
@@ -38,12 +39,16 @@ packages = [
   "instantimpact_common",
   "instantimpact_comfy",
   "instantimpact_prompts",
+  "app",
+  "worker",
 ]
 
 [tool.setuptools.package-dir]
 instantimpact_common = "packages/common/instantimpact_common"
 instantimpact_comfy = "packages/comfy_client/instantimpact_comfy"
 instantimpact_prompts = "packages/prompt_engine/instantimpact_prompts"
+app = "apps/api/app"
+worker = "apps/worker/worker"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

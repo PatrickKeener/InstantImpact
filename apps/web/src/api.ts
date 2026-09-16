@@ -1,7 +1,7 @@
 const BASE = "";
 
 /** Optional LAN auth — set VITE_API_TOKEN at build/dev time or localStorage key instantimpact_api_token */
-function apiToken(): string {
+export function apiToken(): string {
   try {
     return (
       (import.meta as ImportMeta & { env?: { VITE_API_TOKEN?: string } }).env
@@ -12,6 +12,10 @@ function apiToken(): string {
   } catch {
     return "";
   }
+}
+
+export function setApiToken(token: string) {
+  localStorage.setItem("instantimpact_api_token", token);
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -37,6 +41,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -56,6 +61,7 @@ export type Character = {
   niche_tags: string[];
   created_at: string;
   updated_at: string;
+  preview_thumb?: string | null;
   current_version: {
     id: string;
     version_int: number;
@@ -85,6 +91,8 @@ export type LoraStatus = {
   ready_for_dataset: boolean;
   recommended_min: number;
   warning?: string | null;
+  coverage?: Record<string, boolean>;
+  coverage_missing?: string[];
 };
 
 export type Job = {
@@ -92,6 +100,9 @@ export type Job = {
   type: string;
   status: string;
   character_id: string | null;
+  cancel_requested?: boolean;
+  error_message: string | null;
+  created_at: string;
   items: {
     id: string;
     item_index: number;
@@ -99,8 +110,6 @@ export type Job = {
     asset_id: string | null;
     consistency_score: number | null;
   }[];
-  error_message: string | null;
-  created_at: string;
 };
 
 export type Asset = {
@@ -110,12 +119,49 @@ export type Asset = {
   decision: string;
   seed: number | null;
   prompt_positive: string | null;
+  prompt_negative?: string | null;
   consistency_score: number | null;
   created_at: string;
+  width?: number | null;
+  height?: number | null;
+};
+
+export type ApprovedSet = {
+  id: string;
+  character_id: string;
+  title: string;
+  manifest_path: string | null;
+  export_path: string | null;
+  human_export_approved_at: string | null;
+  created_at: string;
+  item_count: number;
+  download?: string;
+};
+
+export type Health = {
+  status: string;
+  mvp?: Record<string, unknown>;
+  redis_ok?: boolean;
+  comfy_healthy?: boolean | null;
+  comfy_enabled?: boolean;
+  gpu_locked?: boolean;
+  disk_free_gb?: number | null;
+  auth_required?: boolean;
+  mock_generation?: boolean;
+};
+
+export type GpuStatus = {
+  locked: boolean;
+  holder_job_id: string | null;
+  message: string;
+  mock_generation: boolean;
+  comfy_enabled: boolean;
+  comfy_healthy: boolean | null;
+  redis_ok: boolean | null;
 };
 
 export const api = {
-  health: () => request<{ status: string; mvp: Record<string, unknown> }>("/api/system/health"),
+  health: () => request<Health>("/api/system/health"),
   listCharacters: () => request<Character[]>("/api/characters"),
   getCharacter: (id: string) => request<Character>(`/api/characters/${id}`),
   createCharacter: (body: unknown) =>
@@ -155,6 +201,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  regenerate: (characterId: string, assetId: string, count = 1) =>
+    request<Job>(`/api/characters/${characterId}/assets/${assetId}/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ count }),
+    }),
   loraStatus: (id: string) => request<LoraStatus>(`/api/characters/${id}/lora/status`),
   buildDataset: (id: string, body?: { decision?: string; min_images?: number }) =>
     request<{
@@ -186,8 +237,11 @@ export const api = {
   listJobs: (characterId?: string) =>
     request<Job[]>(`/api/jobs${characterId ? `?character_id=${characterId}` : ""}`),
   getJob: (id: string) => request<Job>(`/api/jobs/${id}`),
-  listAssets: (characterId: string) =>
-    request<Asset[]>(`/api/characters/${characterId}/assets`),
+  cancelJob: (id: string) => request<Job>(`/api/jobs/${id}/cancel`, { method: "POST" }),
+  listAssets: (characterId: string, decision?: string) =>
+    request<Asset[]>(
+      `/api/characters/${characterId}/assets${decision ? `?decision=${decision}` : ""}`
+    ),
   setDecision: (assetId: string, decision: string) =>
     request(`/api/assets/${assetId}/decision`, {
       method: "POST",
@@ -206,15 +260,23 @@ export const api = {
       `/api/characters/${characterId}/assets/delete`,
       { method: "POST", body: JSON.stringify(body) }
     ),
+  listApprovedSets: (characterId: string) =>
+    request<ApprovedSet[]>(`/api/characters/${characterId}/approved-sets`),
+  createApprovedSet: (characterId: string, body: { title: string; asset_ids: string[] }) =>
+    request<ApprovedSet>(`/api/characters/${characterId}/approved-sets`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  exportApprovedSet: (setId: string, confirm = true) =>
+    request<ApprovedSet>(`/api/approved-sets/${setId}/export`, {
+      method: "POST",
+      body: JSON.stringify({ confirm_adult_synthetic: confirm }),
+    }),
   mediaUrl: (relPath: string) => {
     const url = `/api/system/media/${relPath}`;
-    // img tags cannot set Authorization; if token required, use query (dev only) or same-origin session later
     const token = apiToken();
     if (token) return `${url}?token=${encodeURIComponent(token)}`;
     return url;
   },
-  gpu: () =>
-    request<{ mock_generation: boolean; message: string; comfy_enabled: boolean }>(
-      "/api/system/gpu"
-    ),
+  gpu: () => request<GpuStatus>("/api/system/gpu"),
 };

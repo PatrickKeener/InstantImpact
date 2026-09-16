@@ -23,11 +23,8 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
     public_base_url: str = "http://127.0.0.1:8000"
-    # Comma-separated browser origins allowed for CORS
-    cors_origins: str = (
-        "http://127.0.0.1:5173,http://localhost:5173,"
-        "http://10.10.101.150:5173,http://10.10.101.150:8000"
-    )
+    # Comma-separated browser origins. LAN hosts belong in .env, not here.
+    cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
     database_url: str = "sqlite+aiosqlite:///./data/db/instantimpact.sqlite"
 
     redis_url: str = "redis://127.0.0.1:6379/0"
@@ -58,6 +55,19 @@ class Settings(BaseSettings):
 
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    def bind_is_public(self) -> bool:
+        from instantimpact_common.offline import bind_is_loopback
+
+        return not bind_is_loopback(self.host)
+
+    def auth_is_required(self) -> bool:
+        """Token required when explicitly set, or when LAN-bound with a token configured."""
+        if not self.api_token:
+            return False
+        if self.require_auth_token:
+            return True
+        return self.bind_is_public()
 
 
 @lru_cache

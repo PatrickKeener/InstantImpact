@@ -39,3 +39,15 @@ def relative_to_data(path: Path) -> str:
         return str(path.resolve().relative_to(layout.root)).replace("\\", "/")
     except ValueError:
         return str(path).replace("\\", "/")
+
+
+def resolve_under_root(rel: str, root: Path | None = None) -> Path | None:
+    """Resolve a relative path under data/, rejecting traversal."""
+    layout_root = (root or get_layout().root).resolve()
+    rel_n = str(rel).replace("\\", "/").lstrip("/")
+    target = (layout_root / rel_n).resolve()
+    try:
+        target.relative_to(layout_root)
+    except ValueError:
+        return None
+    return target

@@ -47,11 +47,11 @@ class RandomCharacterRequest(BaseModel):
         description="Optional RNG seed for reproducible random personas",
     )
     auto_attest: bool = Field(
-        default=True,
+        default=False,
         description="Pre-check synthetic + not-real-person (required for generation)",
     )
     auto_bootstrap: bool = Field(
-        default=True,
+        default=False,
         description="Advance draft → bootstrap so seed gallery / stills are allowed",
     )
 
@@ -124,6 +124,7 @@ class CharacterOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     current_version: CharacterVersionOut | None = None
+    preview_thumb: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -148,6 +149,10 @@ class LockCharacterRequest(BaseModel):
     confirm_adult: bool
     confirm_synthetic: bool
     confirm_not_real_person: bool
+    allow_without_lora: bool = Field(
+        default=False,
+        description="Dry-run lock only. Production lock requires a registered LoRA file.",
+    )
 
 
 class TransitionResponse(BaseModel):
