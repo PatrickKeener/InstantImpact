@@ -205,6 +205,35 @@ async def build_training_dataset(
     }
 
 
+def _resolve_lora_source(source_path: str, data_root: Path) -> Path | None:
+    """Accept host paths, Docker /app/data paths, or paths relative to data/."""
+    raw = str(source_path).strip().replace("\\", "/")
+    candidates: list[Path] = [Path(raw).expanduser()]
+    rel = _safe_data_path(raw)
+    if rel:
+        candidates.append(rel)
+    for prefix in ("/home/pkeener/InstantImpact/data/", "/app/data/"):
+        if raw.startswith(prefix):
+            candidates.append(data_root / raw[len(prefix) :])
+    if "/data/characters/" in raw:
+        candidates.append(data_root / raw.split("/data/", 1)[1])
+    if not Path(raw).is_absolute():
+        candidates.append(data_root / raw.lstrip("/"))
+    seen: set[str] = set()
+    for c in candidates:
+        try:
+            p = c.resolve()
+        except OSError:
+            continue
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        if p.is_file():
+            return p
+    return None
+
+
 async def register_lora(
     db: AsyncSession,
     character_id: str,
@@ -223,12 +252,8 @@ async def register_lora(
         raise CharacterServiceError("No character version")
 
     layout = get_layout()
-    src = Path(source_path).expanduser().resolve()
-    if not src.is_file():
-        alt = _safe_data_path(source_path)
-        if alt:
-            src = alt.resolve()
-    if not src.is_file():
+    src = _resolve_lora_source(source_path, layout.root)
+    if src is None or not src.is_file():
         raise CharacterServiceError(
             f"LoRA file not found or not readable: {source_path}", 404
         )

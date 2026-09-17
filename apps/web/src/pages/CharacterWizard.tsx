@@ -57,6 +57,7 @@ export default function CharacterWizard() {
   const [character, setCharacter] = useState<Character | null>(null);
   const [preview, setPreview] = useState<{ positive: string; negative: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [lockChecks, setLockChecks] = useState({
     adult: false,
@@ -161,14 +162,17 @@ export default function CharacterWizard() {
     e?.preventDefault();
     setBusy(true);
     setError(null);
+    setInfo(null);
     try {
       if (isNew) {
         const c = await api.createCharacter(payload());
         setCharacter(c);
+        setInfo("Character created.");
         nav(`/characters/${c.id}`, { replace: true });
       } else {
         const c = await api.updateCharacter(id!, payload());
         setCharacter(c);
+        setInfo("Saved.");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -204,6 +208,8 @@ export default function CharacterWizard() {
   async function doLock() {
     if (!character?.current_version) return;
     setBusy(true);
+    setError(null);
+    setInfo(null);
     try {
       const r = await api.lock(character.id, {
         version_id: character.current_version.id,
@@ -214,6 +220,7 @@ export default function CharacterWizard() {
         allow_without_lora: lockChecks.dryRun,
       });
       setCharacter(r.character);
+      setInfo("Locked. Status is ready — open Studio and generate with the LoRA.");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -262,6 +269,11 @@ export default function CharacterWizard() {
       {error && (
         <div className="rounded-xl border border-red-500/30 bg-red-950/40 px-4 py-3 text-sm text-red-200">
           {error}
+        </div>
+      )}
+      {info && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-100">
+          {info}
         </div>
       )}
 
@@ -629,9 +641,10 @@ export default function CharacterWizard() {
                     />
                     Not targeting a real person
                   </label>
+                  <label className="label mt-2">Lock notes (required, 10+ characters)</label>
                   <textarea
-                    className="input mt-2 min-h-[60px]"
-                    placeholder="Lock checklist notes (required)"
+                    className="input min-h-[60px]"
+                    placeholder="e.g. I confirm Ruby is a synthetic adult 21+ persona, not a real person."
                     value={lockChecks.text}
                     onChange={(e) => setLockChecks({ ...lockChecks, text: e.target.value })}
                   />
@@ -643,13 +656,29 @@ export default function CharacterWizard() {
                     />
                     Dry-run lock without LoRA (not for production)
                   </label>
+                  {character.status === "ready" && (
+                    <p className="text-sm text-emerald-300">
+                      Already locked (ready). Use{" "}
+                      <Link to={`/characters/${character.id}/studio`} className="underline">
+                        Open studio
+                      </Link>{" "}
+                      to generate with the LoRA.
+                    </p>
+                  )}
                   <button
                     type="button"
                     className="btn-primary"
-                    disabled={busy || (!hasLora && !lockChecks.dryRun)}
+                    disabled={
+                      busy ||
+                      (!hasLora && !lockChecks.dryRun) ||
+                      lockChecks.text.trim().length < 10 ||
+                      !lockChecks.adult ||
+                      !lockChecks.synthetic ||
+                      !lockChecks.notReal
+                    }
                     onClick={doLock}
                   >
-                    Human lock → ready
+                    {character.status === "ready" ? "Re-lock (already ready)" : "Human lock → ready"}
                   </button>
                 </div>
               </div>

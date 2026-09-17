@@ -40,12 +40,43 @@ def resolve_toolkit_dir(explicit: str | None = None) -> Path | None:
     return None
 
 
+def _python_has_torchaudio(python: Path) -> bool:
+    if not python.is_file():
+        return False
+    try:
+        import subprocess
+
+        r = subprocess.run(
+            [str(python), "-c", "import torchaudio"],
+            capture_output=True,
+            timeout=20,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def resolve_toolkit_python(toolkit_dir: Path) -> Path:
-    for rel in (".venv/bin/python", "venv/bin/python", ".venv/Scripts/python.exe", "venv/Scripts/python.exe"):
-        p = toolkit_dir / rel
-        if p.is_file():
+    """Pick a toolkit interpreter that can import torchaudio (Ostris uses venv/, not .venv/)."""
+    candidates: list[Path] = []
+    env_py = os.environ.get("INSTANTIMPACT_AI_TOOLKIT_PYTHON")
+    if env_py:
+        candidates.append(Path(env_py).expanduser())
+    candidates.extend(
+        [
+            toolkit_dir / "venv" / "bin" / "python",
+            toolkit_dir / ".venv" / "bin" / "python",
+            toolkit_dir / "venv" / "Scripts" / "python.exe",
+            toolkit_dir / ".venv" / "Scripts" / "python.exe",
+        ]
+    )
+    existing = [p for p in candidates if p.is_file()]
+    for p in existing:
+        if _python_has_torchaudio(p):
             return p
-    return Path(os.environ.get("INSTANTIMPACT_AI_TOOLKIT_PYTHON") or "python3")
+    if existing:
+        return existing[0]
+    return Path(env_py or "python3")
 
 
 def _yaml_escape(value: str) -> str:

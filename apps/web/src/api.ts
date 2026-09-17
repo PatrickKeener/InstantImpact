@@ -160,6 +160,7 @@ export type GpuStatus = {
   comfy_enabled: boolean;
   comfy_healthy: boolean | null;
   redis_ok: boolean | null;
+  queue_depth?: number;
 };
 
 export const api = {

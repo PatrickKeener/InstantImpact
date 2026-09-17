@@ -42,10 +42,12 @@ services:
       INSTANTIMPACT_DATA_DIR: /app/data
       INSTANTIMPACT_WORKFLOWS_DIR: /app/workflows
       INSTANTIMPACT_AI_TOOLKIT_DIR: ${INSTANTIMPACT_AI_TOOLKIT_DIR:-/home/pkeener/ai-toolkit}
+      INSTANTIMPACT_COMFY_LORAS_DIR: ${INSTANTIMPACT_COMFY_LORAS_DIR:-/home/pkeener/ComfyUI/models/loras}
     volumes:
       - ./data:/app/data
       - ./workflows:/app/workflows:ro
       - ${INSTANTIMPACT_AI_TOOLKIT_DIR:-/home/pkeener/ai-toolkit}:${INSTANTIMPACT_AI_TOOLKIT_DIR:-/home/pkeener/ai-toolkit}:ro
+      - ${INSTANTIMPACT_COMFY_LORAS_DIR:-/home/pkeener/ComfyUI/models/loras}:${INSTANTIMPACT_COMFY_LORAS_DIR:-/home/pkeener/ComfyUI/models/loras}
 
   worker:
     build:

@@ -11,11 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from worker.gpu_lock import GpuLock, is_cancel_requested
+from worker.paths import resolve_request_json
 
 
 async def process_lora_train(ctx: dict[str, Any], job_id: str, request_path: str) -> dict[str, Any]:
     redis = ctx["redis"]
-    path = Path(request_path)
+    path = resolve_request_json(request_path, job_id)
     if not path.is_file():
         await _publish(
             redis,

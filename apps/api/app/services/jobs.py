@@ -258,10 +258,18 @@ async def _try_arq_enqueue(job_id: str, request_path: str, job_type: str) -> Non
 
     redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     try:
+        # Relative to data/ so Docker API (/app/data) and native worker (host data/) both resolve it.
+        from app.services.storage import relative_to_data
+
+        payload_path = request_path
+        try:
+            payload_path = relative_to_data(Path(request_path))
+        except Exception:
+            payload_path = request_path
         await redis.enqueue_job(
             "run_generation_job",
             job_id,
-            request_path,
+            payload_path,
             job_type,
             _queue_name="instantimpact",
         )
@@ -461,11 +469,11 @@ async def cancel_job(db: AsyncSession, job_id: str) -> dict:
     if job.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
         return job_to_out(job)
     job.cancel_requested = True
-    # Queued orphans (e.g. pre-fix mock jobs) never get a worker/API runner — close them now.
-    if job.status == JobStatus.QUEUED:
+    # Close queued/running jobs in the API. A dead worker cannot ACK cancel.
+    if job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
         job.status = JobStatus.CANCELLED
         job.finished_at = datetime.now(timezone.utc)
-        job.error_message = job.error_message or "Cancelled while queued"
+        job.error_message = job.error_message or "Cancelled"
         for item in job.items:
             if item.status in (JobItemStatus.PENDING, JobItemStatus.RUNNING):
                 item.status = JobItemStatus.SKIPPED

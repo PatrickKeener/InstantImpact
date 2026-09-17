@@ -212,12 +212,18 @@ async def gpu_status():
     comfy_healthy = None
     redis_ok = None
     holder = None
+    queue_depth = 0
     try:
         import redis.asyncio as redis
 
         r = redis.from_url(settings.redis_url, decode_responses=True)
         redis_ok = bool(await r.ping())
         holder = await r.get("instantimpact:gpu")
+        for key in ("instantimpact", "arq:queue:instantimpact"):
+            n = await r.llen(key)
+            if n:
+                queue_depth = int(n)
+                break
         await r.aclose()
     except Exception:
         redis_ok = False
@@ -237,6 +243,8 @@ async def gpu_status():
         message = "ComfyUI unreachable"
     elif redis_ok is False:
         message = "Redis unreachable"
+    elif queue_depth:
+        message = f"{queue_depth} job(s) queued — start native GPU worker"
     else:
         message = "idle"
     return GpuStatusOut(
@@ -247,4 +255,5 @@ async def gpu_status():
         comfy_enabled=settings.comfy_enabled,
         comfy_healthy=comfy_healthy,
         redis_ok=redis_ok,
+        queue_depth=queue_depth,
     )

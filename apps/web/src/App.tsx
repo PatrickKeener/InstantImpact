@@ -68,13 +68,21 @@ function Nav() {
               className={`hidden rounded-full px-2 py-0.5 sm:inline ${
                 gpu.locked
                   ? "bg-amber-500/20 text-amber-200"
-                  : gpu.mock_generation
-                    ? "bg-white/5"
-                    : "bg-emerald-500/15 text-emerald-200"
+                  : (gpu.queue_depth || 0) > 0
+                    ? "bg-sky-500/20 text-sky-200"
+                    : gpu.mock_generation
+                      ? "bg-white/5"
+                      : "bg-emerald-500/15 text-emerald-200"
               }`}
               title={gpu.message}
             >
-              {gpu.mock_generation ? "mock" : gpu.locked ? "GPU busy" : "GPU idle"}
+              {gpu.mock_generation
+                ? "mock"
+                : gpu.locked
+                  ? "GPU busy"
+                  : (gpu.queue_depth || 0) > 0
+                    ? `${gpu.queue_depth} queued`
+                    : "GPU idle"}
             </span>
           )}
           <button type="button" className="text-slate-500 hover:text-white" onClick={() => setShowToken((s) => !s)}>

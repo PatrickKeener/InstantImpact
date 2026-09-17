@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from worker.gpu_lock import GpuLock, is_cancel_requested
+from worker.paths import resolve_request_json
 
 # Aspect → (width, height) for stills
 _ASPECT_SIZES: dict[str, tuple[int, int]] = {
@@ -33,7 +34,7 @@ async def process_still_job(
     Writes stills under data/outputs and publishes result events for the API consumer.
     """
     redis = ctx["redis"]
-    path = Path(request_path)
+    path = resolve_request_json(request_path, job_id)
     if not path.is_file():
         await _publish(
             redis,

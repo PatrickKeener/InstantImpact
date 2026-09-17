@@ -130,6 +130,7 @@ class GpuStatusOut(BaseModel):
     comfy_enabled: bool = False
     comfy_healthy: bool | None = None
     redis_ok: bool | None = None
+    queue_depth: int = 0
 
 
 class RegenerateAssetRequest(BaseModel):
