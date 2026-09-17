@@ -293,6 +293,7 @@ export default function CharacterStudio() {
   const unlocked = character.status === "bootstrap" || character.status === "draft";
   const approvedCount = assets.filter((a) => a.decision === "approved").length;
   const hasLora = Boolean(lora?.lora_file_present || lora?.comfy_lora_name);
+  const trainJob = jobs.find((j) => j.type === "lora_train");
   const lbAsset = lightbox !== null ? visible[lightbox] : null;
 
   return (
@@ -525,11 +526,36 @@ export default function CharacterStudio() {
             Build dataset only
           </button>
         </div>
+        {trainJob && (
+          <div
+            className={`rounded-xl px-3 py-2 text-sm ${
+              trainJob.status === "failed"
+                ? "border border-red-500/30 bg-red-950/40 text-red-200"
+                : trainJob.status === "completed"
+                  ? "border border-emerald-500/30 bg-emerald-950/30 text-emerald-100"
+                  : "border border-sky-500/30 bg-sky-950/30 text-sky-100"
+            }`}
+          >
+            Train job <span className="font-mono">{trainJob.id.slice(0, 8)}</span> · {trainJob.status}
+            {trainJob.error_message ? ` — ${trainJob.error_message}` : ""}
+            {trainJob.status === "queued" && (
+              <div className="mt-1 text-xs text-sky-200/80">
+                Queued but GPU is idle means no CUDA worker is listening. On nemesis:
+                <pre className="mt-1 overflow-x-auto rounded bg-black/30 p-2 text-[11px]">
+                  {`docker stop instantimpact-worker
+cd /home/pkeener/InstantImpact/apps/worker
+../../.venv/bin/python -m worker.main`}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
         {lora?.toolkit_ready === false && (
           <p className="text-xs text-amber-200">
-            AI Toolkit not visible to the API yet. On nemesis set{" "}
-            <code>INSTANTIMPACT_AI_TOOLKIT_DIR=/home/pkeener/ai-toolkit</code> (clone ostris/ai-toolkit,
-            venv, Flux license). The worker still needs that path even if you click train.
+            AI Toolkit not visible to the API (Docker cannot see the host folder unless it is mounted).
+            On nemesis: clone ostris/ai-toolkit to <code>/home/pkeener/ai-toolkit</code>, add{" "}
+            <code>INSTANTIMPACT_AI_TOOLKIT_DIR=/home/pkeener/ai-toolkit</code> to <code>.env</code>,
+            and run a <strong>native</strong> GPU worker (not the Compose worker).
           </p>
         )}
         <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">

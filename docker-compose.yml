@@ -41,9 +41,11 @@ services:
       INSTANTIMPACT_COMFY_URL: http://127.0.0.1:8188
       INSTANTIMPACT_DATA_DIR: /app/data
       INSTANTIMPACT_WORKFLOWS_DIR: /app/workflows
+      INSTANTIMPACT_AI_TOOLKIT_DIR: ${INSTANTIMPACT_AI_TOOLKIT_DIR:-/home/pkeener/ai-toolkit}
     volumes:
       - ./data:/app/data
       - ./workflows:/app/workflows:ro
+      - ${INSTANTIMPACT_AI_TOOLKIT_DIR:-/home/pkeener/ai-toolkit}:${INSTANTIMPACT_AI_TOOLKIT_DIR:-/home/pkeener/ai-toolkit}:ro
 
   worker:
     build:

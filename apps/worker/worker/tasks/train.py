@@ -96,6 +96,22 @@ async def _run_train(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         )
         return {"ok": False}
 
+    if not _cuda_available():
+        await _publish(
+            redis,
+            {
+                "job_id": job_id,
+                "event": "failed",
+                "error_code": "no_cuda",
+                "message": (
+                    "LoRA train needs a native CUDA worker. "
+                    "docker stop instantimpact-worker ; "
+                    "cd /home/pkeener/InstantImpact/apps/worker && ../../.venv/bin/python -m worker.main"
+                ),
+            },
+        )
+        return {"ok": False}
+
     toolkit_dir = resolve_toolkit_dir(os.environ.get("INSTANTIMPACT_AI_TOOLKIT_DIR"))
     if not toolkit_dir:
         await _publish(
@@ -293,6 +309,18 @@ async def _free_gpu(redis: Any, job_id: str) -> None:
             await client.post(f"{comfy.rstrip('/')}/free", json={"unload_models": True, "free_memory": True})
     except Exception:
         pass
+
+
+def _cuda_available() -> bool:
+    try:
+        proc = __import__("subprocess").run(
+            ["nvidia-smi"],
+            capture_output=True,
+            timeout=8,
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
 
 
 def _resolve_data(meta: dict, abs_key: str, rel_key: str) -> Path:
