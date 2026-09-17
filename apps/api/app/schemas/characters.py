@@ -61,6 +61,13 @@ class BuildDatasetRequest(BaseModel):
     min_images: int = Field(default=4, ge=1, le=200)
 
 
+class TrainLoraRequest(BaseModel):
+    steps: int = Field(default=1500, ge=200, le=4000)
+    strength: float = Field(default=0.85, ge=0.0, le=2.0)
+    min_images: int = Field(default=4, ge=4, le=200)
+    rebuild_dataset: bool = True
+
+
 class RegisterLoraRequest(BaseModel):
     source_path: str = Field(
         min_length=1,

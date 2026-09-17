@@ -118,6 +118,8 @@ async def _enqueue(
     aspect_ratio: str = "4:5",
     seed_policy: str = "random",
     background_tasks: BackgroundTasks | None = None,
+    extra_meta: dict[str, Any] | None = None,
+    force_mock: bool | None = None,
 ) -> Job:
     settings = get_settings()
     c = await char_svc.get_character(db, character_id)
@@ -177,8 +179,12 @@ async def _enqueue(
         appearance=version.appearance_json or {},
         items=units,
         resume_on_item_failure=True,
-        mock=settings.mock_generation or not settings.comfy_enabled,
-        meta={"aspect_ratio": aspect_ratio, "seed_policy": seed_policy},
+        mock=(
+            settings.mock_generation or not settings.comfy_enabled
+            if force_mock is None
+            else force_mock
+        ),
+        meta={"aspect_ratio": aspect_ratio, "seed_policy": seed_policy, **(extra_meta or {})},
     )
     request_path = layout.job_request_path(job_id)
     write_json(request_path, snapshot.model_dump())
@@ -324,6 +330,83 @@ async def enqueue_still_batch(
         aspect_ratio=payload.aspect_ratio,
         seed_policy=payload.seed_policy,
         background_tasks=background_tasks,
+    )
+    return job_to_out(job)
+
+
+async def enqueue_lora_train(
+    db: AsyncSession,
+    character_id: str,
+    *,
+    steps: int = 1500,
+    strength: float = 0.85,
+    min_images: int = 4,
+    rebuild_dataset: bool = True,
+    background_tasks: BackgroundTasks | None = None,
+) -> dict:
+    """Build dataset (optional) then enqueue an Ostris AI Toolkit LoRA train job."""
+    from app.services import lora as lora_svc
+    from instantimpact_common.toolkit import resolve_toolkit_dir
+
+    settings = get_settings()
+    explicit = settings.ai_toolkit_dir or None
+    toolkit = resolve_toolkit_dir(explicit)
+    if not toolkit and not explicit:
+        raise JobServiceError(
+            "Ostris AI Toolkit not found. On nemesis: clone https://github.com/ostris/ai-toolkit "
+            "to /home/pkeener/ai-toolkit, create its venv, accept the FLUX.1-dev license "
+            "(huggingface-cli login), then set INSTANTIMPACT_AI_TOOLKIT_DIR in .env.",
+            400,
+        )
+
+    c = await char_svc.get_character(db, character_id)
+    if rebuild_dataset:
+        await lora_svc.build_training_dataset(
+            db, character_id, decision="approved", min_images=min_images
+        )
+        c = await char_svc.get_character(db, character_id)
+
+    version = _version_for_generation(c)
+    if not version:
+        raise JobServiceError("Character has no version")
+    layout = get_layout()
+    ds_dir = layout.dataset_dir(c.id, version.version_int)
+    if not ds_dir.is_dir() or not any(
+        p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} for p in ds_dir.iterdir()
+    ):
+        raise JobServiceError("No training dataset. Approve stills, then train.")
+
+    lora_dir = layout.lora_dir(c.id, version.version_int)
+    dest = lora_dir / "model.safetensors"
+    training_folder = lora_dir / "toolkit_run"
+    trigger = version.trigger_word or f"sks_{c.slug[:40]}_v{version.version_int}"
+    run_name = f"ii_{c.slug[:40]}_v{version.version_int}"
+    steps = steps or settings.lora_train_steps
+
+    dummy = StillUnitRequest(item_index=0, theme="lora_train", extra_prompt=trigger)
+    job = await _enqueue(
+        db,
+        job_type=JobType.LORA_TRAIN,
+        character_id=character_id,
+        units=[dummy],
+        background_tasks=background_tasks,
+        force_mock=False,
+        extra_meta={
+            "steps": int(steps),
+            "strength": float(strength),
+            "dataset_dir": str(ds_dir.resolve()),
+            "dataset_rel": str(ds_dir.relative_to(layout.root)).replace("\\", "/"),
+            "training_folder": str(training_folder.resolve()),
+            "training_rel": str(training_folder.relative_to(layout.root)).replace("\\", "/"),
+            "dest_path": str(dest.resolve()),
+            "dest_rel": str(dest.relative_to(layout.root)).replace("\\", "/"),
+            "run_name": run_name,
+            "trigger_word": trigger,
+            "toolkit_dir": str(toolkit),
+            "auto_register": True,
+            "slug": c.slug,
+            "version_int": version.version_int,
+        },
     )
     return job_to_out(job)
 
@@ -623,10 +706,22 @@ async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
         await db.commit()
         return
 
+    if name == "log":
+        return
+
     if name == "item_done":
         path = event.get("path")
         if not path:
-            # Progress tick without a file (legacy mock) — ignore
+            idx = event.get("item_index")
+            item = next((i for i in job.items if i.item_index == idx), None)
+            if item and item.status != JobItemStatus.DONE:
+                item.status = JobItemStatus.DONE
+            if job.status == JobStatus.QUEUED:
+                job.status = JobStatus.RUNNING
+                job.started_at = job.started_at or datetime.now(timezone.utc)
+            if event.get("message"):
+                job.error_message = None
+            await db.commit()
             return
         idx = event.get("item_index")
         item = next((i for i in job.items if i.item_index == idx), None)
@@ -692,6 +787,33 @@ async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
             brief = bq.scalar_one_or_none()
             if brief:
                 brief.status = "completed" if job.status == JobStatus.COMPLETED else "failed"
+        lora_path = event.get("lora_path")
+        if (
+            job.type == JobType.LORA_TRAIN
+            and job.status == JobStatus.COMPLETED
+            and lora_path
+            and job.character_id
+        ):
+            try:
+                from app.services import lora as lora_svc
+
+                src = str(lora_path)
+                layout = get_layout()
+                cand = Path(src)
+                if not cand.is_file():
+                    rel = (job.request_json or {}).get("meta", {}).get("dest_rel")
+                    if rel:
+                        src = str((layout.root / rel).resolve())
+                await lora_svc.register_lora(
+                    db,
+                    job.character_id,
+                    source_path=src,
+                    strength=float(event.get("strength") or 0.85),
+                    install_to_comfy=True,
+                )
+                job.error_message = event.get("message") or "LoRA trained and registered"
+            except Exception as e:
+                job.error_message = f"Train finished but register failed: {e}"
         await db.commit()
         return
 

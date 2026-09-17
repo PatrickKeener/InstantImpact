@@ -31,6 +31,7 @@ export default function CharacterStudio() {
   ]);
   const [loraPath, setLoraPath] = useState("");
   const [loraStrength, setLoraStrength] = useState(0.85);
+  const [trainSteps, setTrainSteps] = useState(1500);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("all");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [lightbox, setLightbox] = useState<number | null>(null);
@@ -181,6 +182,33 @@ export default function CharacterStudio() {
       setInfo(
         `Dataset ready: ${res.image_count} images · trigger "${res.trigger_word}" · ${res.dataset_dir}` +
           (res.warning ? ` · ${res.warning}` : "")
+      );
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function trainAndRegister() {
+    if (!id) return;
+    if (approvedCount < 4) {
+      setError("Approve at least 4 photoreal stills first.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const job = await api.trainLora(id, {
+        steps: trainSteps,
+        strength: loraStrength,
+        min_images: 4,
+        rebuild_dataset: true,
+      });
+      setInfo(
+        `LoRA train queued (${job.id.slice(0, 8)}…). GPU is exclusive until this finishes, then weights register automatically.`
       );
       await refresh();
     } catch (e) {
@@ -416,9 +444,8 @@ export default function CharacterStudio() {
       <section className="card space-y-4 p-5">
         <h2 className="font-display text-xl">Identity LoRA</h2>
         <p className="text-sm text-slate-400">
-          Lock face/body consistency: approve 12–30 photo-quality stills → build dataset → train
-          outside InstantImpact (AI Toolkit) → register the{" "}
-          <code className="text-slate-300">.safetensors</code> → lock character → generate.
+          Lock face/body consistency: approve 12–30 photo-quality stills, then train on this machine
+          (Ostris AI Toolkit on the L40S). The worker registers the LoRA when training finishes.
         </p>
         <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl bg-white/5 px-3 py-2">
@@ -468,16 +495,43 @@ export default function CharacterStudio() {
             </div>
           </div>
         )}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label className="label">Train steps</label>
+            <input
+              type="number"
+              min={200}
+              max={4000}
+              step={100}
+              className="input w-28"
+              value={trainSteps}
+              onChange={(e) => setTrainSteps(Number(e.target.value))}
+            />
+          </div>
           <button
             type="button"
             className="btn-primary"
             disabled={busy || approvedCount < 4}
+            onClick={() => void trainAndRegister()}
+          >
+            Train LoRA & register
+          </button>
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={busy || approvedCount < 4}
             onClick={() => void buildDataset()}
           >
-            Build training set from approved
+            Build dataset only
           </button>
         </div>
+        {lora?.toolkit_ready === false && (
+          <p className="text-xs text-amber-200">
+            AI Toolkit not visible to the API yet. On nemesis set{" "}
+            <code>INSTANTIMPACT_AI_TOOLKIT_DIR=/home/pkeener/ai-toolkit</code> (clone ostris/ai-toolkit,
+            venv, Flux license). The worker still needs that path even if you click train.
+          </p>
+        )}
         <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
           <div>
             <label className="label">Trained LoRA path (under data/ or Comfy loras dir)</label>
@@ -513,13 +567,12 @@ export default function CharacterStudio() {
         </div>
         <ol className="list-decimal space-y-1 pl-5 text-xs text-slate-500">
           <li>Approve photoreal stills (reject cartoons / bad faces). Aim for coverage badges above.</li>
-          <li>Build training set → dataset + captions under data/characters/…/dataset/</li>
           <li>
-            On nemesis:{" "}
-            <code className="text-slate-400">./scripts/nemesis/train_lora_hint.sh &lt;character_id&gt;</code>
+            Click <strong>Train LoRA & register</strong> (builds dataset, trains on the GPU worker, copies
+            weights into Comfy). Training takes ~20–90 minutes; stills wait on the GPU lock.
           </li>
-          <li>Register the output .safetensors (must live under data/ or the Comfy loras folder).</li>
-          <li>Edit character → Lock production (LoRA required unless dry-run).</li>
+          <li>The native GPU worker must be running (not the Docker CPU worker). Comfy is unloaded for the train.</li>
+          <li>When the job completes, lock the character (edit → safety lock) and generate with the LoRA.</li>
         </ol>
       </section>
 

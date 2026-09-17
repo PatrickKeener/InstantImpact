@@ -54,10 +54,7 @@ if [[ ! -f "${ROOT}/.env" ]]; then
 fi
 
 if [[ "$STOP_VLLM" -eq 1 ]]; then
-  if command -v docker >/dev/null 2>&1; then
-    echo "  → docker stop vllm (free GPU)"
-    docker stop vllm 2>/dev/null || echo "    (vllm container not running or not named vllm)"
-  fi
+  stop_vllm_if_requested
 fi
 
 # Redis
@@ -87,35 +84,12 @@ fi
 
 # Comfy (optional start)
 if [[ "$WITH_COMFY" -eq 1 ]]; then
-  if http_ok "${COMFY_URL}/system_stats"; then
-    echo "  · comfy already healthy at ${COMFY_URL}"
-  else
-    if [[ ! -d "$COMFY_DIR" ]]; then
-      echo "ERROR: COMFY_DIR not found: ${COMFY_DIR}"
-      exit 1
-    fi
-    COMFY_PY="${COMFY_DIR}/.venv/bin/python"
-    if [[ ! -x "$COMFY_PY" ]]; then
-      COMFY_PY="python3"
-    fi
-    start_bg comfy \
-      bash -c "cd '${COMFY_DIR}' && exec '${COMFY_PY}' main.py --listen 127.0.0.1 --port 8188"
-    echo "    waiting for Comfy..."
-    for _ in $(seq 1 60); do
-      http_ok "${COMFY_URL}/system_stats" && break
-      sleep 1
-    done
-    if http_ok "${COMFY_URL}/system_stats"; then
-      echo "    comfy healthy"
-    else
-      echo "WARN: Comfy did not become healthy — check ${LOG_DIR}/comfy.log"
-    fi
-  fi
+  start_comfy_server || echo "WARN: continuing without healthy Comfy"
 else
   if http_ok "${COMFY_URL}/system_stats"; then
     echo "  · comfy healthy at ${COMFY_URL}"
   else
-    echo "  · comfy not up (mock-only OK). For real gen: ./scripts/nemesis/up.sh --with-comfy"
+    echo "  · comfy not up. For real gen: bash scripts/ii comfy --stop-vllm"
   fi
 fi
 

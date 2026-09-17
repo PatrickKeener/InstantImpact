@@ -23,9 +23,12 @@ for p in (
 from arq.connections import RedisSettings
 
 from worker.tasks.stills import process_still_job
+from worker.tasks.train import process_lora_train
 
 
 async def run_generation_job(ctx, job_id: str, request_path: str, job_type: str):
+    if job_type == "lora_train":
+        return await process_lora_train(ctx, job_id, request_path)
     return await process_still_job(ctx, job_id, request_path, job_type)
 
 

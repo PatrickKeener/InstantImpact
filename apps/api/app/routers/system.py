@@ -97,7 +97,14 @@ async def health():
         "comfy_healthy": comfy_healthy,
         "gpu_locked": bool(gpu_holder),
         "gpu_holder": gpu_holder,
+        "toolkit_ready": _toolkit_ready(),
     }
+
+
+def _toolkit_ready() -> bool:
+    from instantimpact_common.toolkit import resolve_toolkit_dir
+
+    return resolve_toolkit_dir(get_settings().ai_toolkit_dir or None) is not None
 
 
 @router.get("/topology")

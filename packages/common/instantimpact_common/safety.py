@@ -102,8 +102,8 @@ def validate_for_enqueue(
             if character_status == "training":
                 reasons.append("seed_gallery blocked while first-time training is running")
 
-    if job_type == "lora_train" and character_status not in ("bootstrap", "ready"):
-        reasons.append("lora_train requires bootstrap (first train) or ready (retrain)")
+    if job_type == "lora_train" and character_status not in ("bootstrap", "training", "ready"):
+        reasons.append("lora_train requires bootstrap, training, or ready (retrain)")
 
     if job_type.startswith("video") and not video_enabled:
         reasons.append("video generation is not enabled in MVP")

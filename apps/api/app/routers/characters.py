@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -14,8 +14,10 @@ from app.schemas.characters import (
     PromptPreviewResponse,
     RandomCharacterRequest,
     RegisterLoraRequest,
+    TrainLoraRequest,
     TransitionResponse,
 )
+from app.services import jobs as jobs_svc
 from app.services import characters as svc
 from app.services import lora as lora_svc
 
@@ -155,6 +157,30 @@ async def build_dataset(
         )
     except svc.CharacterServiceError as e:
         raise _err(e) from e
+
+
+@router.post("/{character_id}/lora/train")
+async def train_lora(
+    character_id: str,
+    background_tasks: BackgroundTasks,
+    payload: TrainLoraRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Build dataset if needed, enqueue GPU LoRA train, auto-register weights when done."""
+    body = payload or TrainLoraRequest()
+    try:
+        return await jobs_svc.enqueue_lora_train(
+            db,
+            character_id,
+            steps=body.steps,
+            strength=body.strength,
+            min_images=body.min_images,
+            rebuild_dataset=body.rebuild_dataset,
+            background_tasks=background_tasks,
+        )
+    except (svc.CharacterServiceError, jobs_svc.JobServiceError) as e:
+        status = getattr(e, "status_code", 400)
+        raise HTTPException(status_code=status, detail=getattr(e, "message", str(e))) from e
 
 
 @router.post("/{character_id}/lora/register")

@@ -5,6 +5,8 @@
 #   bash scripts/ii start              # API + worker + web + Comfy (background)
 #   bash scripts/ii start --mock       # no Comfy, mock stills
 #   bash scripts/ii start --stop-vllm  # free GPU from docker vllm first
+#   bash scripts/ii comfy              # start ComfyUI only (safe with Docker Compose)
+#   bash scripts/ii comfy --stop-vllm  # free GPU, then start Comfy only
 #   bash scripts/ii stop               # stop everything we started (+ ports)
 #   bash scripts/ii status
 #   bash scripts/ii logs               # tail all logs (Ctrl+C to exit)
@@ -66,6 +68,38 @@ case "$cmd" in
     fi
     # Also clear common ports if orphans remain (manual starts)
     bash "${NEMESIS}/kill-ports.sh" 2>/dev/null || true
+    ;;
+
+  comfy)
+    # Start native ComfyUI only — does not bind 8001/5173, so Docker API/web can stay up.
+    # shellcheck source=nemesis/common.sh
+    source "${NEMESIS}/common.sh"
+    load_dotenv
+    ensure_run_dirs
+    extra_stop=0
+    for a in "$@"; do
+      case "$a" in
+        --stop-vllm) extra_stop=1 ;;
+        -h|--help)
+          echo "Usage: bash scripts/ii comfy [--stop-vllm]"
+          exit 0
+          ;;
+        *)
+          echo "Unknown option: $a"
+          exit 1
+          ;;
+      esac
+    done
+    echo "== InstantImpact Comfy only =="
+    echo "  COMFY_DIR=${COMFY_DIR}"
+    echo "  COMFY_URL=${COMFY_URL}"
+    if [[ "$extra_stop" -eq 1 ]]; then
+      stop_vllm_if_requested
+    fi
+    start_comfy_server
+    echo ""
+    echo "  status: bash scripts/ii status"
+    echo "  logs:   bash scripts/ii logs comfy"
     ;;
 
   status)

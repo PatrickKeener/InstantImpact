@@ -52,6 +52,9 @@ services:
     container_name: instantimpact-worker
     restart: unless-stopped
     network_mode: host
+    # CPU image — LoRA train needs a native CUDA worker instead:
+    #   docker stop instantimpact-worker
+    #   cd apps/worker && ../../.venv/bin/python -m worker.main
     command: ["python", "-m", "worker.main"]
     working_dir: /app/apps/worker
     env_file:

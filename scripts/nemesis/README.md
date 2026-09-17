@@ -16,6 +16,9 @@ bash scripts/ii start --stop-vllm
 # Mock only (no Comfy)
 bash scripts/ii start --mock
 
+# Comfy only (API/web already up via Docker Compose)
+bash scripts/ii comfy --stop-vllm
+
 bash scripts/ii status
 bash scripts/ii logs              # Ctrl+C only stops the tail
 bash scripts/ii logs worker

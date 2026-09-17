@@ -429,4 +429,12 @@ async def lora_status(db: AsyncSession, character_id: str) -> dict[str, Any]:
         "recommended_min": 12,
         "coverage": coverage,
         "coverage_missing": missing,
+        "toolkit_ready": _toolkit_visible(),
     }
+
+
+def _toolkit_visible() -> bool:
+    from instantimpact_common.toolkit import resolve_toolkit_dir
+
+    settings = get_settings()
+    return resolve_toolkit_dir(settings.ai_toolkit_dir or None) is not None

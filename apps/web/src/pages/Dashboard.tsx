@@ -60,8 +60,7 @@ export default function Dashboard() {
           Compose does not start it. On nemesis:
           <pre className="mt-2 overflow-x-auto rounded-lg bg-black/30 p-3 text-xs text-amber-50">
             {`curl -sS http://127.0.0.1:8188/system_stats
-docker stop vllm 2>/dev/null
-bash scripts/ii start --stop-vllm`}
+bash scripts/ii comfy --stop-vllm`}
           </pre>
           Then refresh this page. Health should read <strong>ok</strong> and comfy <strong>ok</strong>.
         </div>

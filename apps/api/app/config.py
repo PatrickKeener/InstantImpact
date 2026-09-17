@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     # Repo root relative workflows
     workflows_dir: Path = Path("./workflows")
 
+    # Ostris AI Toolkit (in-app LoRA train). Empty = auto-detect ~/ai-toolkit.
+    ai_toolkit_dir: str = ""
+    hf_token: str = ""
+    lora_train_steps: int = 1500
+    stop_vllm_before_train: bool = True
+
     def resolved_data_dir(self) -> Path:
         return self.data_dir.resolve()
 

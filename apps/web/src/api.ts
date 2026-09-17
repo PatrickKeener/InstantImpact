@@ -94,6 +94,7 @@ export type LoraStatus = {
   warning?: string | null;
   coverage?: Record<string, boolean>;
   coverage_missing?: string[];
+  toolkit_ready?: boolean;
 };
 
 export type Job = {
@@ -218,6 +219,14 @@ export const api = {
       train_config: Record<string, unknown>;
       lora_dir: string;
     }>(`/api/characters/${id}/dataset/build`, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
+    }),
+  trainLora: (
+    id: string,
+    body?: { steps?: number; strength?: number; min_images?: number; rebuild_dataset?: boolean }
+  ) =>
+    request<Job>(`/api/characters/${id}/lora/train`, {
       method: "POST",
       body: JSON.stringify(body || {}),
     }),
