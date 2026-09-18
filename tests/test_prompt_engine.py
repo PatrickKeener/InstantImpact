@@ -21,3 +21,5 @@ def test_render_includes_trigger_and_adult_tokens():
     assert "violence" in neg
     assert "child" in neg
     assert "cartoon" in neg or "anime" in neg
+    assert "deformed nipples" in neg
+    assert "natural nipples" in pos

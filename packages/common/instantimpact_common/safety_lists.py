@@ -88,6 +88,17 @@ GLOBAL_NEGATIVE_FRAGMENTS: list[str] = [
     "overprocessed",
     "oversaturated",
     "fake skin",
+    "deformed nipples",
+    "misshapen nipples",
+    "extra nipples",
+    "third nipple",
+    "misplaced nipples",
+    "melted nipples",
+    "huge areolas",
+    "puffy cartoon nipples",
+    "inverted nipples",
+    "glowing nipples",
+    "asymmetrical nipples extreme",
 ]
 
 # Positive quality stack for photoreal stills
@@ -103,6 +114,10 @@ PHOTOREAL_QUALITY_TOKENS: list[str] = [
     "professional photography",
     "raw photo",
     "true-to-life colors",
+    "anatomically correct breasts",
+    "natural nipples",
+    "realistic areolas proportional to the breast",
+    "natural nipple color matching skin undertone",
 ]
 
 # Age-positive tokens encouraged in subject line
