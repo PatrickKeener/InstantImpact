@@ -67,34 +67,59 @@ _EYE_COLOR = ["blue", "green", "hazel", "brown", "dark brown", "gray-blue", "amb
 _EYE_SHAPE = ["almond-shaped eyes", "round eyes", "hooded eyes", "upturned eyes"]
 _FACE = ["oval face", "heart-shaped face", "soft square face", "diamond face", "round face"]
 _BODY = [
-    "slim athletic build", "curvy hourglass figure", "petite frame",
-    "tall lean build", "soft feminine figure", "fit toned physique",
+    "slim athletic adult figure, small natural breasts, toned stomach",
+    "soft hourglass adult figure, full natural round breasts, thick hips and thighs",
+    "curvy thick adult figure, large natural round breasts, soft belly, wide hips",
+    "petite adult frame, perky natural breasts, narrow waist",
+    "tall lean adult build, medium teardrop breasts, long legs",
+    "fit toned adult physique, athletic chest, defined waist",
+    "voluptuous adult figure, heavy natural breasts, thick thighs, soft curves",
+    "soft feminine adult figure, medium full breasts, natural hang, rounded hips",
+]
+_BREAST = [
+    "natural round breasts",
+    "full teardrop breasts with natural hang",
+    "thick full breasts, soft natural shape",
+    "medium perky breasts, natural proportions",
+    "large round breasts, realistic weight and hang",
+    "small natural breasts, soft realistic shape",
 ]
 _HEIGHT = ["petite ~5'2\"", "average ~5'5\"", "tall ~5'9\""]
 _MAKEUP = [
-    "natural no-makeup look", "soft glam makeup", "nude lips and defined eyes",
-    "dewy skin minimal makeup", "classic red lip evening look",
+    "natural no-makeup look, real skin texture visible",
+    "soft glam makeup, pores and peach fuzz still visible",
+    "nude lips and defined eyes, dewy realistic skin",
+    "dewy skin minimal makeup, unretouched look",
+    "classic red lip, natural skin not airbrushed",
 ]
 _WARDROBE = [
-    ["oversized knits", "denim", "sneakers"],
-    ["silk blouses", "tailored trousers", "heels"],
-    ["athleisure", "sports bras", "leggings"],
-    ["sundresses", "sandals", "straw bags"],
-    ["leather jackets", "black jeans", "boots"],
-    ["lingerie and robes", "silk slips"],
-    ["crop tops", "high-waist jeans", "gold jewelry"],
+    ["nude", "naked", "bare skin"],
+    ["topless", "nude from the waist up"],
+    ["sheer lingerie", "robe open"],
+    ["silk slip", "barely-there lingerie"],
+    ["oversized tee only", "no bottoms"],
+    ["bikini", "wet skin"],
+    ["casual nude at home", "nothing on"],
 ]
 _STYLE = [
-    ["soft natural light", "intimate portrait"],
-    ["editorial fashion", "clean studio"],
-    ["warm lifestyle", "candid feel"],
-    ["glamour photography", "polished"],
-    ["boudoir aesthetic", "moody shadows"],
+    ["photorealistic DSLR photo", "natural window light", "intimate nude portrait"],
+    ["raw photo", "85mm lens", "boudoir nude", "real skin texture"],
+    ["lifestyle photograph", "candid nude", "available light"],
+    ["glamour photography", "soft studio light", "tasteful full nude"],
+    ["editorial nude", "true-to-life colors", "shallow depth of field"],
 ]
 _FEATURES = [
-    "light freckles across nose", "beauty mark near lip", "dimples when smiling",
-    "high cheekbones", "full lips", "defined jawline", "soft smile lines",
-    "long lashes", "subtle gap between teeth",
+    "light freckles across nose",
+    "beauty mark near lip",
+    "dimples when smiling",
+    "high cheekbones",
+    "full lips",
+    "defined jawline",
+    "soft smile lines",
+    "long lashes",
+    "visible skin pores",
+    "subtle collarbones",
+    "natural body hair stubble on legs none on face",
 ]
 _TRAITS = [
     "confident", "playful", "warm", "curious", "witty", "calm", "flirty",
@@ -108,7 +133,7 @@ _INTERESTS = [
     "fashion design", "coffee culture", "contemporary art", "fitness",
 ]
 _NICHES = [
-    "lifestyle", "glamour", "fitness", "fashion", "boudoir", "casual", "editorial",
+    "lifestyle", "glamour", "nude", "fashion", "boudoir", "casual", "editorial",
 ]
 _FORMALITY = ["casual", "warm", "playful", "direct"]
 _EMOJI = ["none", "light", "heavy"]
@@ -150,8 +175,10 @@ def build_random_character_create(
     ethnicity = _pick(rng, _ETHNICITY_HINTS)
     skin = _pick(rng, _SKIN)
 
-    features = _sample(rng, _FEATURES, k=rng.randint(1, 2))
-    style_kw = _pick(rng, _STYLE)
+    features = _sample(rng, _FEATURES, k=rng.randint(2, 3))
+    breasts = _pick(rng, _BREAST)
+    features = list(dict.fromkeys([*features, breasts]))
+    style_kw = list(_pick(rng, _STYLE))
     wardrobe = _pick(rng, _WARDROBE)
     traits = _sample(rng, _TRAITS, k=rng.randint(3, 5))
     interests = _sample(rng, _INTERESTS, k=rng.randint(2, 4))
@@ -174,12 +201,16 @@ def build_random_character_create(
         f"tell me what kind of shoot vibe you want next.",
     ]
 
-    # Adult content allowed by default for this studio; user can tighten later
-    content_allowed = _sample(
-        rng,
-        ["portrait", "lingerie", "boudoir", "implied nude", "casual lifestyle", "glamour"],
-        k=rng.randint(2, 4),
-    )
+    content_allowed = [
+        "nude",
+        "naked",
+        "topless",
+        "lingerie",
+        "boudoir",
+        "portrait",
+        "glamour",
+        "casual lifestyle",
+    ]
     hard_bans = [
         "underage",
         "teen",
@@ -195,7 +226,11 @@ def build_random_character_create(
 
     freeform = (
         f"clearly adult woman age {age_min}+, {ethnicity}, {skin}, "
-        f"{hair_color} hair, {eye_color} eyes, {body}, consistent facial identity"
+        f"{hair_color} hair, {eye_color} eyes, {body}, {breasts}, "
+        "photorealistic photograph, real human skin texture, natural skin pores, "
+        "subtle skin imperfections, natural lighting, shot on 85mm lens, "
+        "raw photo, true-to-life colors, works nude and naked as well as clothed, "
+        "tasteful erotic photography, consistent facial identity"
     )
 
     appearance = AppearanceProfile(

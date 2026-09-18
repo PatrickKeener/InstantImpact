@@ -25,3 +25,17 @@ def test_random_without_attest():
     p = build_random_character_create(seed=1, auto_attest=False)
     assert p.synthetic_confirmed is False
     assert p.not_real_person_attested is False
+
+
+def test_random_character_photoreal_nude_language():
+    p = build_random_character_create(seed=11, auto_attest=False)
+    notes = (p.appearance.freeform_notes or "").lower()
+    assert "photorealistic" in notes
+    assert "nude" in notes and "naked" in notes
+    assert "adult" in notes
+    assert any(w in notes for w in ("breast", "breasts", "hourglass", "thick", "figure"))
+    allowed = {x.lower() for x in p.boundaries.content_allowed}
+    assert "nude" in allowed and "naked" in allowed
+    assert p.appearance.body_type
+    feats = " ".join(p.appearance.distinguishing_features).lower()
+    assert "breast" in feats
