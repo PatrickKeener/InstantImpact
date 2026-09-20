@@ -208,6 +208,28 @@ class ApprovedSetItem(Base):
     caption_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class Product(Base):
+    """Commercial product reference for ad-style stills (separate from character face refs)."""
+
+    __tablename__ = "products"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    slug: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    primary_path: Mapped[str] = mapped_column(Text)
+    thumb_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sha256: Mapped[str] = mapped_column(String(64), default="")
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    meta_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
 class AppSetting(Base):
     __tablename__ = "app_settings"
 

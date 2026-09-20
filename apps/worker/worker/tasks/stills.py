@@ -141,6 +141,9 @@ async def _run_mock(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             pose_hint=item.get("pose_hint"),
             location_hint=item.get("location_hint"),
             extra_prompt=item.get("extra_prompt"),
+            product_name=item.get("product_name"),
+            product_description=item.get("product_description"),
+            product_placement=item.get("product_placement"),
         )
         w, h = 768, 960
         img = Image.new("RGB", (w, h), color=(36, 36, 48))
@@ -148,11 +151,31 @@ async def _run_mock(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         draw.text((24, 24), f"MOCK STILL #{item_index}", fill=(220, 220, 230))
         draw.text((24, 60), f"seed={seed}", fill=(180, 180, 200))
         draw.text((24, 96), f"theme={theme}", fill=(180, 180, 200))
+        if item.get("product_name"):
+            draw.text(
+                (24, 120),
+                f"product={item.get('product_name')} ({item.get('product_placement') or 'holding'})",
+                fill=(200, 180, 140),
+            )
         snippet = (positive[:180] + "…") if len(positive) > 180 else positive
-        draw.text((24, 140), snippet[:90], fill=(160, 160, 180))
-        draw.text((24, 164), snippet[90:180], fill=(160, 160, 180))
+        y0 = 148 if item.get("product_name") else 140
+        draw.text((24, y0), snippet[:90], fill=(160, 160, 180))
+        draw.text((24, y0 + 24), snippet[90:180], fill=(160, 160, 180))
         draw.text((24, h - 80), "SYNTHETIC · 21+", fill=(120, 200, 140))
         draw.text((24, h - 50), "InstantImpact mock pipeline", fill=(120, 120, 140))
+
+        from instantimpact_common.product_media import (
+            paste_product_corner,
+            product_meta_from_item,
+            resolve_product_image,
+        )
+
+        pref = resolve_product_image(data_dir, item)
+        if pref is not None:
+            try:
+                img = paste_product_corner(img, pref)
+            except Exception:
+                pass
 
         still_name = f"still_{item_index:03d}_s{seed}.png"
         still_path = out_dir / still_name
@@ -170,6 +193,7 @@ async def _run_mock(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             "job_id": job_id,
             "seed": seed,
             "pipeline": "mock",
+            **product_meta_from_item(item),
         }
         still_path.with_suffix(".disclosure.json").write_text(
             json.dumps(disclosure, indent=2), encoding="utf-8"
@@ -343,6 +367,9 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             pose_hint=item.get("pose_hint"),
             location_hint=item.get("location_hint"),
             extra_prompt=item.get("extra_prompt"),
+            product_name=item.get("product_name"),
+            product_description=item.get("product_description"),
+            product_placement=item.get("product_placement"),
         )
         if "adult" not in positive.lower() and "21" not in positive:
             positive = (
@@ -403,6 +430,8 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             rel_still = str(still_path.relative_to(data_dir)).replace("\\", "/")
             rel_thumb = str(thumb_path.relative_to(data_dir)).replace("\\", "/")
 
+            from instantimpact_common.product_media import product_meta_from_item
+
             disclosure = {
                 "synthetic": True,
                 "ai_generated": True,
@@ -414,6 +443,7 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
                 "seed": seed,
                 "lora_name": lora_name,
                 "ref_pack": str(refs) if refs else None,
+                **product_meta_from_item(item),
             }
             still_path.with_suffix(".disclosure.json").write_text(
                 json.dumps(disclosure, indent=2), encoding="utf-8"

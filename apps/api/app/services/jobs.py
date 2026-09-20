@@ -89,6 +89,8 @@ def _expand_brief_items(items: list[BriefItem] | list[dict]) -> list[StillUnitRe
                     pose_hint=item.pose_hint,
                     location_hint=item.location_hint,
                     extra_prompt=item.extra_prompt,
+                    product_id=item.product_id,
+                    product_placement=item.product_placement,
                 )
             )
             idx += 1
@@ -97,6 +99,29 @@ def _expand_brief_items(items: list[BriefItem] | list[dict]) -> list[StillUnitRe
     if len(units) > 100:
         raise JobServiceError("Max 100 stills per batch in MVP")
     return units
+
+
+async def _attach_products(db: AsyncSession, units: list[StillUnitRequest]) -> None:
+    """Resolve product_id → denormalized name/path fields on each unit."""
+    from app.services import products as product_svc
+
+    product_cache: dict[str, Any] = {}
+    for u in units:
+        if not u.product_id:
+            continue
+        if u.product_id not in product_cache:
+            try:
+                product_cache[u.product_id] = await product_svc.get_product(db, u.product_id)
+            except product_svc.ProductServiceError as e:
+                raise JobServiceError(e.message, e.status_code) from e
+        fields = product_svc.resolve_product_fields(
+            product_cache[u.product_id], u.product_placement
+        )
+        u.product_id = fields["product_id"]
+        u.product_name = fields["product_name"]
+        u.product_description = fields["product_description"]
+        u.product_ref_path = fields["product_ref_path"]
+        u.product_placement = fields["product_placement"]
 
 
 def _version_for_generation(c) -> Any:
@@ -127,12 +152,23 @@ async def _enqueue(
     if not version:
         raise JobServiceError("Character has no version")
 
+    await _attach_products(db, units)
+
     texts = []
     for u in units:
         texts.extend(
             filter(
                 None,
-                [u.theme, u.outfit_hint, u.pose_hint, u.location_hint, u.extra_prompt],
+                [
+                    u.theme,
+                    u.outfit_hint,
+                    u.pose_hint,
+                    u.location_hint,
+                    u.extra_prompt,
+                    u.product_name,
+                    u.product_description,
+                    u.product_placement,
+                ],
             )
         )
     safety = validate_for_enqueue(
@@ -450,6 +486,11 @@ async def enqueue_regenerate(
                 location_hint=req.get("location_hint"),
                 extra_prompt=req.get("extra_prompt"),
                 aspect_ratio=req.get("aspect_ratio") or "4:5",
+                product_id=req.get("product_id"),
+                product_name=req.get("product_name"),
+                product_description=req.get("product_description"),
+                product_ref_path=req.get("product_ref_path"),
+                product_placement=req.get("product_placement"),
             )
         )
     job = await _enqueue(
@@ -866,6 +907,9 @@ async def run_mock_job(db: AsyncSession, job_id: str) -> None:
             pose_hint=req.get("pose_hint"),
             location_hint=req.get("location_hint"),
             extra_prompt=req.get("extra_prompt"),
+            product_name=req.get("product_name"),
+            product_description=req.get("product_description"),
+            product_placement=req.get("product_placement"),
         )
         seed = req.get("seed") or random.randint(1, 10**9)
         w, h = 768, 960
@@ -875,12 +919,32 @@ async def run_mock_job(db: AsyncSession, job_id: str) -> None:
         draw.text((24, 24), title, fill=(220, 220, 230))
         draw.text((24, 60), f"seed={seed}", fill=(180, 180, 200))
         draw.text((24, 96), f"theme={req.get('theme')}", fill=(180, 180, 200))
+        if req.get("product_name"):
+            draw.text(
+                (24, 120),
+                f"product={req.get('product_name')} ({req.get('product_placement') or 'holding'})",
+                fill=(200, 180, 140),
+            )
         # wrap prompt snippet
         snippet = (positive[:180] + "…") if len(positive) > 180 else positive
-        draw.text((24, 140), snippet[:90], fill=(160, 160, 180))
-        draw.text((24, 164), snippet[90:180], fill=(160, 160, 180))
+        y0 = 148 if req.get("product_name") else 140
+        draw.text((24, y0), snippet[:90], fill=(160, 160, 180))
+        draw.text((24, y0 + 24), snippet[90:180], fill=(160, 160, 180))
         draw.text((24, h - 80), "SYNTHETIC · 21+", fill=(120, 200, 140))
         draw.text((24, h - 50), "InstantImpact mock pipeline", fill=(120, 120, 140))
+
+        from instantimpact_common.product_media import (
+            paste_product_corner,
+            product_meta_from_item,
+            resolve_product_image,
+        )
+
+        pref = resolve_product_image(layout.root, req)
+        if pref is not None:
+            try:
+                img = paste_product_corner(img, pref)
+            except Exception:
+                pass
 
         filename = f"still_{item.item_index:03d}_s{seed}.png"
         path = out_dir / filename
@@ -903,6 +967,7 @@ async def run_mock_job(db: AsyncSession, job_id: str) -> None:
             "job_id": job_id,
             "seed": seed,
             "pipeline": "mock" if settings.mock_generation else "flux",
+            **product_meta_from_item(req),
         }
         write_json(path.with_suffix(".disclosure.json"), disclosure)
 

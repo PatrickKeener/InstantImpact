@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard";
 import CharacterList from "./pages/CharacterList";
 import CharacterWizard from "./pages/CharacterWizard";
 import CharacterStudio from "./pages/CharacterStudio";
+import Products from "./pages/Products";
 
 function Nav() {
   const loc = useLocation();
@@ -61,6 +62,7 @@ function Nav() {
         <nav className="flex items-center gap-1">
           {link("/", "Dashboard")}
           {link("/characters", "Characters")}
+          {link("/products", "Products")}
         </nav>
         <div className="flex items-center gap-2 text-[11px] text-slate-400">
           {gpu && (
@@ -125,6 +127,7 @@ export default function App() {
           <Route path="/characters/new" element={<CharacterWizard />} />
           <Route path="/characters/:id" element={<CharacterWizard />} />
           <Route path="/characters/:id/studio" element={<CharacterStudio />} />
+          <Route path="/products" element={<Products />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

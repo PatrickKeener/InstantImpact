@@ -86,6 +86,7 @@ async def health():
             "captions": settings.enable_captions,
             "sdxl": settings.enable_sdxl,
             "external_refs": settings.enable_external_refs,
+            "product_uploads": settings.enable_product_uploads,
             "mock_generation": settings.mock_generation,
         },
         "strict_offline": settings.strict_offline,

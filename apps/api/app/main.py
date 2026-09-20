@@ -24,7 +24,7 @@ for p in (
 
 from app.config import get_settings
 from app.db.session import init_db
-from app.routers import characters, jobs, system
+from app.routers import characters, jobs, products, system
 from app.services.storage import get_layout
 
 log = logging.getLogger("instantimpact.api")
@@ -98,6 +98,7 @@ def create_app() -> FastAPI:
     application.include_router(system.router)
     application.include_router(characters.router)
     application.include_router(jobs.router)
+    application.include_router(products.router)
 
     @application.get("/")
     async def root():

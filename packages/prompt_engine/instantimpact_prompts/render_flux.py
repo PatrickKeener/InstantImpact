@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from instantimpact_common.schemas import PromptContract
+from instantimpact_prompts.product import product_prompt_fragment
 from instantimpact_prompts.themes import THEME_HINTS
 
 
@@ -14,6 +15,9 @@ def render_flux_prompts(
     pose_hint: str | None = None,
     location_hint: str | None = None,
     extra_prompt: str | None = None,
+    product_name: str | None = None,
+    product_description: str | None = None,
+    product_placement: str | None = None,
 ) -> tuple[str, str]:
     """Return (positive, negative) prompt strings for Flux."""
     if isinstance(contract, dict):
@@ -39,6 +43,13 @@ def render_flux_prompts(
         parts.append(pose_hint)
     if location_hint:
         parts.append(f"location: {location_hint}")
+    product_clause = product_prompt_fragment(
+        name=product_name,
+        description=product_description,
+        placement=product_placement,
+    )
+    if product_clause:
+        parts.append(product_clause)
     if extra_prompt:
         parts.append(extra_prompt)
     if contract.raw_notes:

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, ApprovedSet, Asset, Character, Job, LoraStatus } from "../api";
+import { api, ApprovedSet, Asset, Character, Job, LoraStatus, Product } from "../api";
 
 const THEMES = [
   "portrait",
@@ -12,7 +12,22 @@ const THEMES = [
   "gym",
 ];
 
-type BriefLine = { theme: string; count: number; outfit: string };
+const PRODUCT_PLACEMENT_OPTIONS = [
+  { id: "holding", label: "holding" },
+  { id: "beside", label: "beside" },
+  { id: "using", label: "using" },
+  { id: "featured", label: "featured" },
+  { id: "wearing", label: "wearing" },
+] as const;
+
+type BriefLine = {
+  theme: string;
+  count: number;
+  outfit: string;
+  useProduct: boolean;
+  productId: string;
+  productPlacement: string;
+};
 
 const FILTERS = ["all", "pending", "approved", "rejected"] as const;
 
@@ -23,11 +38,19 @@ export default function CharacterStudio() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [lora, setLora] = useState<LoraStatus | null>(null);
   const [sets, setSets] = useState<ApprovedSet[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [lines, setLines] = useState<BriefLine[]>([
-    { theme: "casual_bedroom", count: 4, outfit: "oversized tee" },
+    {
+      theme: "casual_bedroom",
+      count: 4,
+      outfit: "oversized tee",
+      useProduct: false,
+      productId: "",
+      productPlacement: "holding",
+    },
   ]);
   const [loraPath, setLoraPath] = useState("");
   const [loraStrength, setLoraStrength] = useState(0.85);
@@ -40,18 +63,20 @@ export default function CharacterStudio() {
 
   const refresh = useCallback(async () => {
     if (!id) return;
-    const [c, j, a, l, s] = await Promise.all([
+    const [c, j, a, l, s, p] = await Promise.all([
       api.getCharacter(id),
       api.listJobs(id),
       api.listAssets(id),
       api.loraStatus(id),
       api.listApprovedSets(id),
+      api.listProducts(),
     ]);
     setCharacter(c);
     setJobs(j);
     setAssets(a);
     setLora(l);
     setSets(s);
+    setProducts(p);
   }, [id]);
 
   useEffect(() => {
@@ -108,6 +133,12 @@ export default function CharacterStudio() {
 
   async function runBatch() {
     if (!id) return;
+    for (const line of lines) {
+      if (line.useProduct && !line.productId) {
+        setError("Turn off product reference or pick a product on each enabled line.");
+        return;
+      }
+    }
     setBusy(true);
     setError(null);
     try {
@@ -120,6 +151,9 @@ export default function CharacterStudio() {
           theme: l.theme,
           outfit_hint: l.outfit || undefined,
           pose_hint: "relaxed natural pose",
+          product_id: l.useProduct && l.productId ? l.productId : undefined,
+          product_placement:
+            l.useProduct && l.productId ? l.productPlacement || "holding" : undefined,
         })),
       });
       await refresh();
@@ -372,68 +406,162 @@ export default function CharacterStudio() {
 
         <section className="card space-y-4 p-5">
           <h2 className="font-display text-xl">Batch stills</h2>
-          <p className="text-xs text-slate-500">Add multiple brief lines (theme × count).</p>
+          <p className="text-xs text-slate-500">
+            Add brief lines (theme × count). Optionally toggle a product reference per line for
+            ad-style stills.
+          </p>
           {lines.map((line, idx) => (
-            <div key={idx} className="grid gap-2 sm:grid-cols-[1fr_5rem_1fr_auto]">
-              <select
-                className="input"
-                value={line.theme}
-                onChange={(e) => {
-                  const next = [...lines];
-                  next[idx] = { ...line, theme: e.target.value };
-                  setLines(next);
-                }}
-              >
-                {THEMES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="number"
-                min={1}
-                max={40}
-                className="input"
-                value={line.count}
-                onChange={(e) => {
-                  const next = [...lines];
-                  next[idx] = { ...line, count: Number(e.target.value) };
-                  setLines(next);
-                }}
-              />
-              <input
-                className="input"
-                value={line.outfit}
-                placeholder="outfit hint"
-                onChange={(e) => {
-                  const next = [...lines];
-                  next[idx] = { ...line, outfit: e.target.value };
-                  setLines(next);
-                }}
-              />
-              <button
-                type="button"
-                className="btn-ghost px-2"
-                disabled={lines.length === 1}
-                onClick={() => setLines(lines.filter((_, i) => i !== idx))}
-              >
-                ✕
-              </button>
+            <div key={idx} className="space-y-2 rounded-xl bg-white/[0.03] p-3">
+              <div className="grid gap-2 sm:grid-cols-[1fr_5rem_1fr_auto]">
+                <select
+                  className="input"
+                  value={line.theme}
+                  onChange={(e) => {
+                    const next = [...lines];
+                    next[idx] = { ...line, theme: e.target.value };
+                    setLines(next);
+                  }}
+                >
+                  {THEMES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min={1}
+                  max={40}
+                  className="input"
+                  value={line.count}
+                  onChange={(e) => {
+                    const next = [...lines];
+                    next[idx] = { ...line, count: Number(e.target.value) };
+                    setLines(next);
+                  }}
+                />
+                <input
+                  className="input"
+                  value={line.outfit}
+                  placeholder="outfit hint"
+                  onChange={(e) => {
+                    const next = [...lines];
+                    next[idx] = { ...line, outfit: e.target.value };
+                    setLines(next);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn-ghost px-2"
+                  disabled={lines.length === 1}
+                  onClick={() => setLines(lines.filter((_, i) => i !== idx))}
+                >
+                  ✕
+                </button>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={line.useProduct}
+                  onChange={(e) => {
+                    const next = [...lines];
+                    next[idx] = {
+                      ...line,
+                      useProduct: e.target.checked,
+                      productId:
+                        e.target.checked && !line.productId && products[0]
+                          ? products[0].id
+                          : line.productId,
+                    };
+                    setLines(next);
+                  }}
+                />
+                Product reference
+              </label>
+              {line.useProduct && (
+                <div className="grid gap-2 sm:grid-cols-[1fr_8rem_auto]">
+                  <select
+                    className="input"
+                    value={line.productId}
+                    onChange={(e) => {
+                      const next = [...lines];
+                      next[idx] = { ...line, productId: e.target.value };
+                      setLines(next);
+                    }}
+                  >
+                    <option value="">Select product…</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                        {p.brand ? ` · ${p.brand}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="input"
+                    value={line.productPlacement}
+                    onChange={(e) => {
+                      const next = [...lines];
+                      next[idx] = { ...line, productPlacement: e.target.value };
+                      setLines(next);
+                    }}
+                  >
+                    {PRODUCT_PLACEMENT_OPTIONS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                  {line.productId &&
+                    (() => {
+                      const p = products.find((x) => x.id === line.productId);
+                      const thumb = p?.thumb_path || p?.primary_path;
+                      return thumb ? (
+                        <img
+                          src={api.mediaUrl(thumb)}
+                          alt=""
+                          className="h-10 w-10 rounded-lg object-contain bg-black/30"
+                        />
+                      ) : (
+                        <span className="text-xs text-slate-500">—</span>
+                      );
+                    })()}
+                </div>
+              )}
             </div>
           ))}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               className="btn-ghost text-xs"
-              onClick={() => setLines([...lines, { theme: "portrait", count: 2, outfit: "" }])}
+              onClick={() =>
+                setLines([
+                  ...lines,
+                  {
+                    theme: "portrait",
+                    count: 2,
+                    outfit: "",
+                    useProduct: false,
+                    productId: "",
+                    productPlacement: "holding",
+                  },
+                ])
+              }
             >
               Add line
             </button>
             <button className="btn-primary" disabled={busy} onClick={() => void runBatch()}>
               Generate batch
             </button>
+            <Link to="/products" className="btn-ghost text-xs">
+              Manage products
+            </Link>
           </div>
+          {products.length === 0 && (
+            <p className="text-xs text-amber-200/80">
+              No products uploaded yet. Add one under Products to enable product references.
+            </p>
+          )}
           <p className="text-xs text-slate-500">
             {hasLora
               ? `Using character LoRA (${lora?.comfy_lora_name}) + trigger ${lora?.trigger_word}`

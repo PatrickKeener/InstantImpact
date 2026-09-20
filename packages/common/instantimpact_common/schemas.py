@@ -106,6 +106,9 @@ class BriefItem(BaseModel):
     pose_hint: str | None = None
     location_hint: str | None = None
     extra_prompt: str | None = None
+    # Optional product reference for ad-style stills (resolved at enqueue)
+    product_id: str | None = None
+    product_placement: str | None = None  # holding | beside | using | featured | wearing
 
 
 class StillUnitRequest(BaseModel):
@@ -120,6 +123,12 @@ class StillUnitRequest(BaseModel):
     extra_prompt: str | None = None
     aspect_ratio: str = "4:5"
     preset: str = "still_production"
+    # Denormalized product fields so workers never need SQLite
+    product_id: str | None = None
+    product_name: str | None = None
+    product_description: str | None = None
+    product_ref_path: str | None = None
+    product_placement: str | None = None
 
 
 class JobRequestSnapshot(BaseModel):

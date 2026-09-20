@@ -140,6 +140,28 @@ export type ApprovedSet = {
   download?: string;
 };
 
+export type Product = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  brand: string | null;
+  primary_path: string;
+  thumb_path: string | null;
+  sha256: string;
+  width: number | null;
+  height: number | null;
+  meta: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProductPlacement = {
+  id: string;
+  label: string;
+  prompt: string;
+};
+
 export type Health = {
   status: string;
   mvp?: Record<string, unknown>;
@@ -290,4 +312,40 @@ export const api = {
     return url;
   },
   gpu: () => request<GpuStatus>("/api/system/gpu"),
+  listProducts: () => request<Product[]>("/api/products"),
+  productPlacements: () =>
+    request<{ placements: ProductPlacement[] }>("/api/products/placements"),
+  createProduct: async (fields: {
+    name: string;
+    description?: string;
+    brand?: string;
+    image: File;
+  }) => {
+    const form = new FormData();
+    form.append("name", fields.name);
+    if (fields.description) form.append("description", fields.description);
+    if (fields.brand) form.append("brand", fields.brand);
+    form.append("image", fields.image);
+    const headers: Record<string, string> = {};
+    const token = apiToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(`${BASE}/api/products`, { method: "POST", headers, body: form });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = await res.json();
+        detail = body.detail || JSON.stringify(body);
+      } catch {
+        /* ignore */
+      }
+      throw new Error(`${res.status} ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
+    }
+    return res.json() as Promise<Product>;
+  },
+  updateProduct: (id: string, body: { name?: string; description?: string; brand?: string }) =>
+    request<Product>(`/api/products/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteProduct: (id: string) =>
+    request<{ id: string; deleted: boolean; files_removed: number }>(`/api/products/${id}`, {
+      method: "DELETE",
+    }),
 };

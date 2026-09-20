@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     enable_video: bool = False
     enable_captions: bool = False
     enable_external_refs: bool = False
+    # Product packaging/product shots for ads — separate from character face refs.
+    enable_product_uploads: bool = True
 
     mock_generation: bool = True
 

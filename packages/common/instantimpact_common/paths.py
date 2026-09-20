@@ -48,6 +48,13 @@ class StorageLayout:
     def models_dir(self) -> Path:
         return self.root / "models"
 
+    @property
+    def products_dir(self) -> Path:
+        return self.root / "products"
+
+    def product_dir(self, product_id: str) -> Path:
+        return self.products_dir / product_id
+
     def character_dir(self, character_id: str) -> Path:
         return self.characters_dir / character_id
 
@@ -87,5 +94,6 @@ class StorageLayout:
             self.approved_dir,
             self.exports_dir,
             self.models_dir,
+            self.products_dir,
         ):
             ensure_dir(p)
