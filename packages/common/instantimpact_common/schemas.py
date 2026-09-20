@@ -46,6 +46,20 @@ class SpeakingStyle(BaseModel):
     example_lines: list[str] = Field(default_factory=list)
 
 
+class MarketingVoice(BaseModel):
+    """Reusable character voice for ad captions across products/campaigns."""
+
+    tagline: str | None = None
+    audience: str | None = None
+    cta_style: str | None = None  # soft | direct | playful | urgent
+    value_props: list[str] = Field(default_factory=list)
+    words_to_use: list[str] = Field(default_factory=list)
+    words_to_avoid: list[str] = Field(default_factory=list)
+    sample_ads: list[str] = Field(default_factory=list)
+    hashtag_style: str | None = None  # none | light | branded
+    sign_off: str | None = None
+
+
 class BoundariesProfile(BaseModel):
     """Hard bans become negative prompt fragments and enqueue deny checks."""
 

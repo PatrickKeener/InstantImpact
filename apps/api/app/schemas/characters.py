@@ -9,6 +9,7 @@ from instantimpact_common.enums import AgeAppearanceBand, CharacterStatus, Pipel
 from instantimpact_common.schemas import (
     AppearanceProfile,
     BoundariesProfile,
+    MarketingVoice,
     PersonalityProfile,
     PipelineParams,
     SpeakingStyle,
@@ -29,6 +30,7 @@ class CharacterCreate(BaseModel):
     personality: PersonalityProfile = Field(default_factory=PersonalityProfile)
     boundaries: BoundariesProfile = Field(default_factory=BoundariesProfile)
     speaking_style: SpeakingStyle = Field(default_factory=SpeakingStyle)
+    marketing_voice: MarketingVoice = Field(default_factory=MarketingVoice)
     trigger_word: str | None = None
 
     @field_validator("age_appearance_min")
@@ -90,6 +92,7 @@ class CharacterUpdate(BaseModel):
     personality: PersonalityProfile | None = None
     boundaries: BoundariesProfile | None = None
     speaking_style: SpeakingStyle | None = None
+    marketing_voice: MarketingVoice | None = None
     trigger_word: str | None = None
     pipeline_params: PipelineParams | None = None
 
@@ -103,6 +106,7 @@ class CharacterVersionOut(BaseModel):
     personality: dict[str, Any]
     boundaries: dict[str, Any]
     speaking_style: dict[str, Any]
+    marketing_voice: dict[str, Any] = Field(default_factory=dict)
     niche_tags: list[str]
     trigger_word: str | None
     lora_path: str | None
@@ -148,6 +152,45 @@ class PromptPreviewResponse(BaseModel):
     positive: str
     negative: str
     contract: dict[str, Any]
+
+
+class AdCopyRequest(BaseModel):
+    product_id: str | None = None
+    theme: str | None = None
+    product_placement: str | None = None
+    count: int = Field(default=3, ge=1, le=8)
+    seed: int | None = None
+    asset_id: str | None = Field(
+        default=None,
+        description="If set, pull theme/product hints from the asset job item when available",
+    )
+
+
+class AdCopyVariant(BaseModel):
+    caption: str
+    short: str
+    cta: str
+    hook: str
+
+
+class AdCopyResponse(BaseModel):
+    engine: str
+    character_name: str
+    tone: str | None = None
+    cta_style: str | None = None
+    product_name: str | None = None
+    primary: str
+    short: str
+    cta: str
+    variants: list[AdCopyVariant] = Field(default_factory=list)
+    voice: dict[str, Any] = Field(default_factory=dict)
+
+
+class AssetCaptionSaveRequest(BaseModel):
+    caption: str = Field(min_length=1, max_length=4000)
+    short: str | None = None
+    cta: str | None = None
+    product_id: str | None = None
 
 
 class LockCharacterRequest(BaseModel):

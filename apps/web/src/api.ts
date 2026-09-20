@@ -71,6 +71,7 @@ export type Character = {
     personality: Record<string, unknown>;
     boundaries: Record<string, unknown>;
     speaking_style: Record<string, unknown>;
+    marketing_voice?: Record<string, unknown>;
     trigger_word: string | null;
     lora_path?: string | null;
     prompt_contract: Record<string, unknown>;
@@ -126,6 +127,29 @@ export type Asset = {
   created_at: string;
   width?: number | null;
   height?: number | null;
+  meta?: Record<string, unknown>;
+};
+
+export type AdCopyVariant = {
+  caption: string;
+  short: string;
+  cta: string;
+  hook: string;
+};
+
+export type AdCopyResult = {
+  engine: string;
+  character_name: string;
+  tone?: string | null;
+  cta_style?: string | null;
+  product_name?: string | null;
+  primary: string;
+  short: string;
+  cta: string;
+  variants: AdCopyVariant[];
+  voice: Record<string, unknown>;
+  product_id?: string | null;
+  theme?: string | null;
 };
 
 export type ApprovedSet = {
@@ -216,6 +240,30 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  generateAdCopy: (
+    id: string,
+    body: {
+      product_id?: string;
+      theme?: string;
+      product_placement?: string;
+      count?: number;
+      seed?: number;
+      asset_id?: string;
+    }
+  ) =>
+    request<AdCopyResult>(`/api/characters/${id}/ad-copy`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  saveAssetCaption: (
+    characterId: string,
+    assetId: string,
+    body: { caption: string; short?: string; cta?: string; product_id?: string }
+  ) =>
+    request<{ id: string; caption: string; short?: string; cta?: string; meta: Record<string, unknown> }>(
+      `/api/characters/${characterId}/assets/${assetId}/caption`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
   seedGallery: (id: string, body: unknown) =>
     request<Job>(`/api/characters/${id}/seed-gallery`, {
       method: "POST",

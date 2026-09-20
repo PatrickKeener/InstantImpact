@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, ApprovedSet, Asset, Character, Job, LoraStatus, Product } from "../api";
+import { api, AdCopyResult, ApprovedSet, Asset, Character, Job, LoraStatus, Product } from "../api";
 
 const THEMES = [
   "portrait",
@@ -60,6 +60,11 @@ export default function CharacterStudio() {
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [setTitle, setSetTitle] = useState("Approved pack");
   const [exportConfirm, setExportConfirm] = useState(false);
+  const [adProductId, setAdProductId] = useState("");
+  const [adTheme, setAdTheme] = useState("glamour");
+  const [adCopy, setAdCopy] = useState<AdCopyResult | null>(null);
+  const [adCaptionEdit, setAdCaptionEdit] = useState("");
+  const [captionAssetId, setCaptionAssetId] = useState("");
 
   const refresh = useCallback(async () => {
     if (!id) return;
@@ -156,6 +161,51 @@ export default function CharacterStudio() {
             l.useProduct && l.productId ? l.productPlacement || "holding" : undefined,
         })),
       });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runAdCopy(fromAssetId?: string) {
+    if (!id) return;
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const res = await api.generateAdCopy(id, {
+        product_id: adProductId || undefined,
+        theme: adTheme || undefined,
+        count: 3,
+        asset_id: fromAssetId || captionAssetId || undefined,
+      });
+      setAdCopy(res);
+      setAdCaptionEdit(res.primary);
+      setInfo(`Ad copy ready (${res.engine}${res.product_name ? ` · ${res.product_name}` : ""}).`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveCaptionToAsset() {
+    if (!id || !captionAssetId || !adCaptionEdit.trim()) {
+      setError("Select an output still and generate/edit a caption first.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.saveAssetCaption(id, captionAssetId, {
+        caption: adCaptionEdit.trim(),
+        short: adCopy?.short,
+        cta: adCopy?.cta,
+        product_id: adProductId || adCopy?.product_id || undefined,
+      });
+      setInfo("Caption saved on still — reuse this voice across the campaign.");
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -730,6 +780,103 @@ cd /home/pkeener/InstantImpact/apps/worker
         </ol>
       </section>
 
+      <section className="card space-y-4 p-5">
+        <h2 className="font-display text-xl">Marketing voice → ad copy</h2>
+        <p className="text-sm text-slate-400">
+          Generate captions in this character&apos;s reusable voice. Set the voice under Edit →
+          Personality, then use it across products and stills.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <label className="block space-y-1 text-sm">
+            <span className="text-slate-500">Product (optional)</span>
+            <select
+              className="input"
+              value={adProductId}
+              onChange={(e) => setAdProductId(e.target.value)}
+            >
+              <option value="">No product</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block space-y-1 text-sm">
+            <span className="text-slate-500">Theme</span>
+            <select className="input" value={adTheme} onChange={(e) => setAdTheme(e.target.value)}>
+              {THEMES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block space-y-1 text-sm">
+            <span className="text-slate-500">Attach to still</span>
+            <select
+              className="input"
+              value={captionAssetId}
+              onChange={(e) => setCaptionAssetId(e.target.value)}
+            >
+              <option value="">Select output…</option>
+              {assets.slice(0, 40).map((a) => (
+                <option key={a.id} value={a.id}>
+                  {(a.meta?.marketing_caption ? "✓ " : "") +
+                    `seed ${a.seed ?? "?"} · ${a.decision}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex items-end gap-2">
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={busy}
+              onClick={() => void runAdCopy()}
+            >
+              Generate copy
+            </button>
+            <Link to={id ? `/characters/${id}` : "/characters"} className="btn-ghost text-xs">
+              Edit voice
+            </Link>
+          </div>
+        </div>
+        {adCopy && (
+          <div className="space-y-3">
+            <textarea
+              className="input min-h-[100px]"
+              value={adCaptionEdit}
+              onChange={(e) => setAdCaptionEdit(e.target.value)}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={busy || !captionAssetId}
+                onClick={() => void saveCaptionToAsset()}
+              >
+                Save caption to still
+              </button>
+              {adCopy.variants.slice(1).map((v, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className="btn-ghost text-xs"
+                  onClick={() => setAdCaptionEdit(v.caption)}
+                >
+                  Variant {i + 2}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500">
+              Tone: {adCopy.tone || "—"} · CTA: {adCopy.cta_style || "—"}
+              {adCopy.product_name ? ` · Product: ${adCopy.product_name}` : ""}
+            </p>
+          </div>
+        )}
+      </section>
+
       <section className="card p-5">
         <h2 className="font-display text-xl">Recent jobs</h2>
         <div className="mt-3 overflow-x-auto">
@@ -828,12 +975,20 @@ cd /home/pkeener/InstantImpact/apps/worker
                     onChange={(e) => setSelected({ ...selected, [a.id]: e.target.checked })}
                   />
                   seed {a.seed ?? "—"}
+                  {a.meta?.marketing_caption ? (
+                    <span className="rounded bg-emerald-500/15 px-1 text-emerald-200">caption</span>
+                  ) : null}
                   {a.consistency_score != null && (
                     <span className="ml-auto text-accent-soft">
                       {(a.consistency_score * 100).toFixed(0)}%
                     </span>
                   )}
                 </label>
+                {typeof a.meta?.marketing_caption === "string" && (
+                  <p className="line-clamp-2 text-[10px] text-slate-400">
+                    {a.meta.marketing_caption}
+                  </p>
+                )}
                 <div className="flex gap-1">
                   <button
                     type="button"

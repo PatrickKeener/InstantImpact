@@ -55,6 +55,7 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
         # Lightweight patches for existing SQLite files (Alembic stamps these too)
         await _add_column_if_missing(conn, "approved_sets", "export_path", "TEXT")
+        await _add_column_if_missing(conn, "character_versions", "marketing_voice_json", "JSON")
     _run_alembic_upgrade()
 
 

@@ -56,6 +56,7 @@ def version_to_dict(v: CharacterVersion) -> dict:
         "personality": v.personality_json or {},
         "boundaries": v.boundaries_json or {},
         "speaking_style": v.speaking_style_json or {},
+        "marketing_voice": v.marketing_voice_json or {},
         "niche_tags": v.niche_tags_json or [],
         "trigger_word": v.trigger_word,
         "lora_path": v.lora_path,
@@ -214,6 +215,7 @@ async def create_character(db: AsyncSession, payload: CharacterCreate) -> dict:
         personality_json=payload.personality.model_dump(),
         boundaries_json=payload.boundaries.model_dump(),
         speaking_style_json=payload.speaking_style.model_dump(),
+        marketing_voice_json=payload.marketing_voice.model_dump(),
         niche_tags_json=payload.niche_tags,
         trigger_word=trigger,
         pipeline_params_json=params,
@@ -259,6 +261,7 @@ async def update_character(db: AsyncSession, character_id: str, payload: Charact
             personality_json=dict(version.personality_json or {}),
             boundaries_json=dict(version.boundaries_json or {}),
             speaking_style_json=dict(version.speaking_style_json or {}),
+            marketing_voice_json=dict(version.marketing_voice_json or {}),
             niche_tags_json=list(version.niche_tags_json or []),
             trigger_word=version.trigger_word,
             pipeline_params_json=dict(version.pipeline_params_json or {}),
@@ -303,6 +306,8 @@ async def update_character(db: AsyncSession, character_id: str, payload: Charact
         version.boundaries_json = data["boundaries"]
     if "speaking_style" in data and data["speaking_style"] is not None:
         version.speaking_style_json = data["speaking_style"]
+    if "marketing_voice" in data and data["marketing_voice"] is not None:
+        version.marketing_voice_json = data["marketing_voice"]
     if "trigger_word" in data and data["trigger_word"] is not None:
         version.trigger_word = data["trigger_word"]
     if "pipeline_params" in data and data["pipeline_params"] is not None:
