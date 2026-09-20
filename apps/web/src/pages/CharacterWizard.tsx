@@ -39,6 +39,17 @@ const emptyForm = {
     emoji_use: "light",
     example_lines: "" as string,
   },
+  marketing_voice: {
+    tagline: "",
+    audience: "",
+    cta_style: "soft",
+    value_props: "" as string,
+    words_to_use: "" as string,
+    words_to_avoid: "" as string,
+    sample_ads: "" as string,
+    hashtag_style: "light",
+    sign_off: "",
+  },
 };
 
 function splitList(s: string): string[] {
@@ -80,6 +91,7 @@ export default function CharacterWizard() {
         const p = (v?.personality || {}) as Record<string, string | string[]>;
         const b = (v?.boundaries || {}) as Record<string, string | string[]>;
         const s = (v?.speaking_style || {}) as Record<string, string | string[]>;
+        const mv = (v?.marketing_voice || {}) as Record<string, string | string[]>;
         setForm({
           display_name: c.display_name,
           age_appearance_min: c.age_appearance_min,
@@ -121,6 +133,25 @@ export default function CharacterWizard() {
               ? s.example_lines.join("\n")
               : String(s.example_lines || ""),
           },
+          marketing_voice: {
+            tagline: String(mv.tagline || ""),
+            audience: String(mv.audience || ""),
+            cta_style: String(mv.cta_style || "soft"),
+            value_props: Array.isArray(mv.value_props)
+              ? mv.value_props.join("\n")
+              : String(mv.value_props || ""),
+            words_to_use: Array.isArray(mv.words_to_use)
+              ? mv.words_to_use.join(", ")
+              : String(mv.words_to_use || ""),
+            words_to_avoid: Array.isArray(mv.words_to_avoid)
+              ? mv.words_to_avoid.join(", ")
+              : String(mv.words_to_avoid || ""),
+            sample_ads: Array.isArray(mv.sample_ads)
+              ? mv.sample_ads.join("\n")
+              : String(mv.sample_ads || ""),
+            hashtag_style: String(mv.hashtag_style || "light"),
+            sign_off: String(mv.sign_off || ""),
+          },
         });
       })
       .catch((e) => setError(e.message));
@@ -154,6 +185,17 @@ export default function CharacterWizard() {
         formality: form.speaking_style.formality,
         emoji_use: form.speaking_style.emoji_use,
         example_lines: splitList(form.speaking_style.example_lines),
+      },
+      marketing_voice: {
+        tagline: form.marketing_voice.tagline || null,
+        audience: form.marketing_voice.audience || null,
+        cta_style: form.marketing_voice.cta_style || null,
+        value_props: splitList(form.marketing_voice.value_props),
+        words_to_use: splitList(form.marketing_voice.words_to_use),
+        words_to_avoid: splitList(form.marketing_voice.words_to_avoid),
+        sample_ads: splitList(form.marketing_voice.sample_ads),
+        hashtag_style: form.marketing_voice.hashtag_style || null,
+        sign_off: form.marketing_voice.sign_off || null,
       },
     };
   }
@@ -505,9 +547,149 @@ export default function CharacterWizard() {
                 }
               />
             </div>
+
+            <h3 className="pt-2 font-display text-lg">Marketing voice</h3>
             <p className="text-xs text-slate-500">
-              Personality is stored now for future offline captions (post-MVP).
+              Reusable ad voice across products and campaigns. Studio can generate captions from this
+              profile (offline templates; Ollama polish later).
             </p>
+            <div>
+              <label className="label">Tagline</label>
+              <input
+                className="input"
+                value={form.marketing_voice.tagline}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    marketing_voice: { ...form.marketing_voice, tagline: e.target.value },
+                  })
+                }
+                placeholder="Soft glam, no filter energy."
+              />
+            </div>
+            <div>
+              <label className="label">Audience</label>
+              <input
+                className="input"
+                value={form.marketing_voice.audience}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    marketing_voice: { ...form.marketing_voice, audience: e.target.value },
+                  })
+                }
+                placeholder="women who want easy everyday luxury"
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="label">CTA style</label>
+                <select
+                  className="input"
+                  value={form.marketing_voice.cta_style}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      marketing_voice: { ...form.marketing_voice, cta_style: e.target.value },
+                    })
+                  }
+                >
+                  <option value="soft">Soft</option>
+                  <option value="direct">Direct</option>
+                  <option value="playful">Playful</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Hashtags</label>
+                <select
+                  className="input"
+                  value={form.marketing_voice.hashtag_style}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      marketing_voice: { ...form.marketing_voice, hashtag_style: e.target.value },
+                    })
+                  }
+                >
+                  <option value="none">None</option>
+                  <option value="light">Light</option>
+                  <option value="branded">Branded</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="label">Value props (one per line)</label>
+              <textarea
+                className="input min-h-[70px]"
+                value={form.marketing_voice.value_props}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    marketing_voice: { ...form.marketing_voice, value_props: e.target.value },
+                  })
+                }
+                placeholder="feels effortless&#10;looks expensive without trying"
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="label">Words to use</label>
+                <input
+                  className="input"
+                  value={form.marketing_voice.words_to_use}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      marketing_voice: { ...form.marketing_voice, words_to_use: e.target.value },
+                    })
+                  }
+                  placeholder="glow, soft, real"
+                />
+              </div>
+              <div>
+                <label className="label">Words to avoid</label>
+                <input
+                  className="input"
+                  value={form.marketing_voice.words_to_avoid}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      marketing_voice: { ...form.marketing_voice, words_to_avoid: e.target.value },
+                    })
+                  }
+                  placeholder="cheap, hack, miracle"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="label">Sample ads (one per line)</label>
+              <textarea
+                className="input min-h-[80px]"
+                value={form.marketing_voice.sample_ads}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    marketing_voice: { ...form.marketing_voice, sample_ads: e.target.value },
+                  })
+                }
+                placeholder="This is my everyday reset in a bottle."
+              />
+            </div>
+            <div>
+              <label className="label">Sign-off</label>
+              <input
+                className="input"
+                value={form.marketing_voice.sign_off}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    marketing_voice: { ...form.marketing_voice, sign_off: e.target.value },
+                  })
+                }
+                placeholder="xx — always yours"
+              />
+            </div>
           </>
         )}
 

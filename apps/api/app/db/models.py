@@ -67,6 +67,7 @@ class CharacterVersion(Base):
     personality_json: Mapped[dict] = mapped_column(JSON, default=dict)
     boundaries_json: Mapped[dict] = mapped_column(JSON, default=dict)
     speaking_style_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    marketing_voice_json: Mapped[dict] = mapped_column(JSON, default=dict)
     niche_tags_json: Mapped[list] = mapped_column(JSON, default=list)
     trigger_word: Mapped[str | None] = mapped_column(String(80), nullable=True)
     lora_path: Mapped[str | None] = mapped_column(Text, nullable=True)

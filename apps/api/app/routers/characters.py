@@ -5,6 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.characters import (
+    AdCopyRequest,
+    AdCopyResponse,
+    AssetCaptionSaveRequest,
     BuildDatasetRequest,
     CharacterCreate,
     CharacterOut,
@@ -17,6 +20,7 @@ from app.schemas.characters import (
     TrainLoraRequest,
     TransitionResponse,
 )
+from app.services import ad_copy as ad_copy_svc
 from app.services import jobs as jobs_svc
 from app.services import characters as svc
 from app.services import lora as lora_svc
@@ -130,6 +134,30 @@ async def preview_prompt(
         )
     except svc.CharacterServiceError as e:
         raise _err(e) from e
+
+
+@router.post("/{character_id}/ad-copy", response_model=AdCopyResponse)
+async def generate_ad_copy(
+    character_id: str, payload: AdCopyRequest, db: AsyncSession = Depends(get_db)
+):
+    """Generate marketing captions in this character's reusable voice (offline templates)."""
+    try:
+        return await ad_copy_svc.generate_ad_copy(db, character_id, payload)
+    except ad_copy_svc.AdCopyServiceError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message) from e
+
+
+@router.post("/{character_id}/assets/{asset_id}/caption")
+async def save_asset_caption(
+    character_id: str,
+    asset_id: str,
+    payload: AssetCaptionSaveRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await ad_copy_svc.save_asset_caption(db, character_id, asset_id, payload)
+    except ad_copy_svc.AdCopyServiceError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message) from e
 
 
 @router.get("/{character_id}/lora/status")
