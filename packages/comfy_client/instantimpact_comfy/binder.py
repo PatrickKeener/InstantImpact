@@ -47,6 +47,7 @@ def _replace_in_value(value: Any, mapping: dict[str, Any]) -> Any:
             if key not in mapping:
                 raise KeyError(f"Missing substitution for {{{{{key}}}}}")
             return mapping[key]
+
         # Partial embed in longer strings
         def repl(match: re.Match[str]) -> str:
             key = match.group(1)
@@ -71,11 +72,7 @@ def load_workflow(path: Path) -> dict[str, Any]:
 
 def nodes_only(workflow: dict[str, Any]) -> dict[str, Any]:
     """Strip _meta and non-node keys before sending to Comfy /prompt."""
-    return {
-        k: v
-        for k, v in workflow.items()
-        if isinstance(v, dict) and "class_type" in v
-    }
+    return {k: v for k, v in workflow.items() if isinstance(v, dict) and "class_type" in v}
 
 
 # Required keys for flux_still_character_v1 (CheckpointLoaderSimple / FP8 path)
@@ -88,6 +85,7 @@ FLUX_STILL_REQUIRED_VARS = {
     "HEIGHT",
     "STEPS",
     "CFG",
+    "GUIDANCE",
     "FILENAME_PREFIX",
 }
 

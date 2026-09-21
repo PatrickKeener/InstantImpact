@@ -225,14 +225,9 @@ def build_random_character_create(
     )
 
     freeform = (
-        f"clearly adult woman age {age_min}+, {ethnicity}, {skin}, "
-        f"{hair_color} hair, {eye_color} eyes, {body}, {breasts}, "
-        "photorealistic photograph, real human skin texture, natural skin pores, "
-        "subtle skin imperfections, natural lighting, shot on 85mm lens, "
-        "raw photo, true-to-life colors, anatomically correct breasts, "
-        "natural nipples, realistic proportional areolas, "
-        "works nude and naked as well as clothed, "
-        "tasteful erotic photography, consistent facial identity"
+        f"clearly adult woman age {age_min}+, authentic photorealistic candid photograph, "
+        "unretouched real skin texture, subtle natural imperfections, "
+        "consistent facial identity"
     )
 
     appearance = AppearanceProfile(

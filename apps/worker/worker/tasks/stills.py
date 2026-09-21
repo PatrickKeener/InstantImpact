@@ -331,9 +331,13 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         return {"ok": False}
 
     default_steps = int(flux_params.get("steps") or 28)
-    default_cfg = float(flux_params.get("cfg") if flux_params.get("cfg") is not None else 1.0)
-    if default_cfg > 2.0:
-        default_cfg = 1.0
+    # Flux Dev is guidance-distilled: traditional KSampler CFG must remain 1.0.
+    # Prompt adherence is controlled by the native FluxGuidance node instead.
+    default_cfg = 1.0
+    default_guidance = float(
+        flux_params.get("guidance") if flux_params.get("guidance") is not None else 2.5
+    )
+    default_guidance = max(1.0, min(default_guidance, 5.0))
     if default_steps < 20:
         default_steps = 28
 
@@ -387,7 +391,8 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             "WIDTH": width,
             "HEIGHT": height,
             "STEPS": int(item.get("steps") or default_steps),
-            "CFG": float(item.get("cfg") or default_cfg),
+            "CFG": default_cfg,
+            "GUIDANCE": default_guidance,
             "FILENAME_PREFIX": prefix,
         }
         if use_lora:
@@ -439,6 +444,9 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
                 "pipeline": "flux",
                 "comfy_prompt_id": prompt_id,
                 "ckpt": ckpt_name,
+                "steps": variables["STEPS"],
+                "guidance": default_guidance,
+                "cfg": default_cfg,
                 "job_id": job_id,
                 "seed": seed,
                 "lora_name": lora_name,

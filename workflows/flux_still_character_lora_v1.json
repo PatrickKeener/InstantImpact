@@ -1,7 +1,7 @@
 {
   "_meta": {
     "name": "flux_still_character_lora_v1",
-    "description": "Flux FP8 checkpoint + character LoRA via LoraLoader. Use when version has comfy_lora_name.",
+    "description": "Flux FP8 checkpoint + native FluxGuidance + character LoRA. Use when version has comfy_lora_name.",
     "checkpoint": "flux1-dev-fp8.safetensors",
     "lora": "ComfyUI/models/loras/{{LORA_NAME}}"
   },
@@ -26,6 +26,13 @@
     "inputs": {
       "text": "{{POSITIVE_PROMPT}}",
       "clip": ["10", 1]
+    }
+  },
+  "11": {
+    "class_type": "FluxGuidance",
+    "inputs": {
+      "guidance": "{{GUIDANCE}}",
+      "conditioning": ["6", 0]
     }
   },
   "7": {
@@ -53,7 +60,7 @@
       "scheduler": "simple",
       "denoise": 1.0,
       "model": ["10", 0],
-      "positive": ["6", 0],
+      "positive": ["11", 0],
       "negative": ["7", 0],
       "latent_image": ["5", 0]
     }

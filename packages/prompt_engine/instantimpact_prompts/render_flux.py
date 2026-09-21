@@ -9,8 +9,9 @@ from instantimpact_prompts.themes import THEME_HINTS
 
 # Character defaults that read as indoors and would fight an outdoor scene request.
 _INDOOR_STYLE_MARKERS = ("studio", "window light", "indoor", "bedroom", "bathroom")
-
 _OUTFIT_STATE_PREFIXES = ("nude", "naked", "topless", "wearing ")
+_REVEALING_MARKERS = ("nude", "naked", "topless", "see-through", "see through", "sheer")
+_ANATOMY_MARKERS = ("breast", "nipple", "areola")
 
 
 def render_flux_prompts(
@@ -37,13 +38,16 @@ def render_flux_prompts(
     style_tokens, wardrobe_tokens = _split_wardrobe(contract)
     scene = THEME_HINTS.get(theme, theme.replace("_", " "))
     outfit = (outfit_hint or "").strip()
+    exposure = outfit or ", ".join(wardrobe_tokens)
+    revealing = _contains_any(exposure, _REVEALING_MARKERS)
 
     parts: list[str] = []
     # Lead with photo intent — Flux weights early tokens heavily
     parts.append("photorealistic photograph")
     parts.extend(contract.subject_tokens)
-    parts.extend(contract.appearance_tokens)
 
+    # Shot-specific instructions must precede detailed identity attributes so
+    # both Flux text encoders receive the requested scene and wardrobe.
     parts.append(scene)
     if outfit:
         # Avoid "wearing nude" awkwardness; pass outfit as-is if it already describes state
@@ -68,11 +72,14 @@ def render_flux_prompts(
     if extra_prompt:
         parts.append(extra_prompt)
 
-    parts.extend(_filter_style_for_scene(style_tokens, scene))
-    notes = _strip_wardrobe_hedges(contract.raw_notes, replaced=bool(outfit))
+    parts.extend(contract.appearance_tokens)
+    parts.extend(_filter_style_for_shot(style_tokens, scene=scene, outfit=outfit))
+    notes = _filter_notes_for_shot(contract.raw_notes, scene=scene, outfit=outfit)
     if notes:
         parts.append(notes)
-    parts.extend(contract.quality_tokens)
+    parts.extend(
+        _filter_quality_for_shot(contract.quality_tokens, scene=scene, revealing=revealing)
+    )
 
     positive = ", ".join(_dedupe_tokens(parts))
     negative = ", ".join(_dedupe_tokens(contract.negative_tokens))
@@ -96,18 +103,44 @@ def _split_wardrobe(contract: PromptContract) -> tuple[list[str], list[str]]:
     return style, wardrobe
 
 
-def _filter_style_for_scene(style_tokens: list[str], scene: str) -> list[str]:
-    if "outdoor" not in scene.lower():
-        return style_tokens
-    return [s for s in style_tokens if not any(m in s.lower() for m in _INDOOR_STYLE_MARKERS)]
+def _filter_style_for_shot(style_tokens: list[str], *, scene: str, outfit: str) -> list[str]:
+    filtered = style_tokens
+    if "outdoor" in scene.lower():
+        filtered = [s for s in filtered if not _contains_any(s, _INDOOR_STYLE_MARKERS)]
+    if outfit and not _contains_any(outfit, _REVEALING_MARKERS):
+        filtered = [s for s in filtered if not _contains_any(s, _REVEALING_MARKERS)]
+    return filtered
 
 
-def _strip_wardrobe_hedges(notes: str | None, *, replaced: bool) -> str | None:
-    """Drop clauses like "works nude as well as clothed" when a shot names an outfit."""
-    if not notes or not replaced:
+def _filter_notes_for_shot(notes: str | None, *, scene: str, outfit: str) -> str | None:
+    """Remove profile-note clauses that contradict explicit shot direction."""
+    if not notes:
         return notes
-    kept = [c.strip() for c in notes.split(",") if "clothed" not in c.lower()]
+    kept = [c.strip() for c in notes.split(",")]
+    if "outdoor" in scene.lower():
+        kept = [c for c in kept if not _contains_any(c, _INDOOR_STYLE_MARKERS)]
+    if outfit:
+        if _contains_any(outfit, _REVEALING_MARKERS):
+            kept = [c for c in kept if "clothed" not in c.lower()]
+        else:
+            kept = [c for c in kept if not _contains_any(c, _REVEALING_MARKERS)]
     return ", ".join(c for c in kept if c) or None
+
+
+def _filter_quality_for_shot(
+    quality_tokens: list[str], *, scene: str, revealing: bool
+) -> list[str]:
+    filtered = quality_tokens
+    if not revealing:
+        filtered = [q for q in filtered if not _contains_any(q, _ANATOMY_MARKERS)]
+    if _contains_any(scene, ("mm lens", "smartphone camera")):
+        filtered = [q for q in filtered if q.lower() != "shot on 85mm lens"]
+    return filtered
+
+
+def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
+    value = text.lower()
+    return any(marker in value for marker in markers)
 
 
 def _dedupe_tokens(parts: list[str]) -> list[str]:

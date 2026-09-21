@@ -31,11 +31,6 @@ def build_prompt_contract(
     for field in (
         appearance.skin_tone,
         appearance.face_shape,
-        appearance.eye_color,
-        appearance.eye_shape,
-        appearance.hair_color,
-        appearance.hair_length,
-        appearance.hair_style,
         appearance.body_type,
         appearance.height_hint,
         appearance.makeup_style,
@@ -43,6 +38,25 @@ def build_prompt_contract(
     ):
         if field:
             appearance_tokens.append(str(field).strip())
+
+    eye_parts = [
+        str(value).strip() for value in (appearance.eye_color, appearance.eye_shape) if value
+    ]
+    if eye_parts:
+        eyes = " ".join(eye_parts)
+        appearance_tokens.append(eyes if "eye" in eyes.lower() else f"{eyes} eyes")
+
+    hair_parts = [
+        str(value).strip() for value in (appearance.hair_length, appearance.hair_color) if value
+    ]
+    if hair_parts:
+        hair = " ".join(hair_parts)
+        hair = hair if "hair" in hair.lower() else f"{hair} hair"
+        if appearance.hair_style:
+            hair = f"{hair} styled in {str(appearance.hair_style).strip()}"
+        appearance_tokens.append(hair)
+    elif appearance.hair_style:
+        appearance_tokens.append(f"hair styled in {str(appearance.hair_style).strip()}")
 
     appearance_tokens.extend(f.strip() for f in appearance.distinguishing_features if f.strip())
     style_tokens = [s.strip() for s in appearance.style_keywords if s.strip()]

@@ -27,13 +27,13 @@ def test_random_without_attest():
     assert p.not_real_person_attested is False
 
 
-def test_random_character_photoreal_nude_language():
+def test_random_character_photoreal_profile_is_concise():
     p = build_random_character_create(seed=11, auto_attest=False)
     notes = (p.appearance.freeform_notes or "").lower()
     assert "photorealistic" in notes
-    assert "nude" in notes and "naked" in notes
     assert "adult" in notes
-    assert any(w in notes for w in ("breast", "breasts", "hourglass", "thick", "figure"))
+    assert p.appearance.hair_color.lower() not in notes
+    assert p.appearance.eye_color.lower() not in notes
     allowed = {x.lower() for x in p.boundaries.content_allowed}
     assert "nude" in allowed and "naked" in allowed
     assert p.appearance.body_type

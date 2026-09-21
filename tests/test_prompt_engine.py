@@ -23,7 +23,21 @@ def test_render_includes_trigger_and_adult_tokens():
     assert "child" in neg
     assert "cartoon" in neg or "anime" in neg
     assert "deformed nipples" in neg
-    assert "natural nipples" in pos
+    assert "natural nipples" not in pos
+
+
+def test_anatomy_detail_only_used_for_revealing_shots():
+    contract = build_prompt_contract(
+        appearance=AppearanceProfile(hair_color="auburn"),
+        boundaries=BoundariesProfile(),
+        trigger_word="sks_aria_v1",
+    )
+    clothed, _ = render_flux_prompts(contract, theme="outdoor_day", outfit_hint="denim jacket")
+    revealing, _ = render_flux_prompts(
+        contract, theme="outdoor_day", outfit_hint="naked with see-through dress"
+    )
+    assert "natural nipples" not in clothed
+    assert "natural nipples" in revealing
 
 
 def test_render_includes_product_placement():
@@ -67,8 +81,25 @@ def test_shot_intent_outranks_character_defaults():
     # The "as well as clothed" hedge would undo an explicit nude outfit
     assert "clothed" not in pos
     # Scene and outfit land ahead of the character's style defaults
-    assert pos.index("outdoor daylight") < pos.index("glamour photography")
+    assert pos.index("clearly outdoors") < pos.index("glamour photography")
     assert pos.index("naked with see through dress") < pos.index("glamour photography")
+    assert pos.index("clearly outdoors") < pos.index("auburn")
+
+
+def test_clothed_outfit_drops_nude_character_style():
+    contract = build_prompt_contract(
+        appearance=AppearanceProfile(
+            style_keywords=["tasteful full nude", "raw photo"],
+            freeform_notes="candid nude, natural expression",
+        ),
+        boundaries=BoundariesProfile(),
+        trigger_word="sks_aria_v1",
+    )
+    pos, _ = render_flux_prompts(contract, theme="outdoor_day", outfit_hint="denim jacket")
+    assert "nude" not in pos
+    assert "wearing denim jacket" in pos
+    assert "raw photo" in pos
+    assert "natural expression" in pos
 
 
 def test_wardrobe_used_when_shot_has_no_outfit():
