@@ -114,11 +114,23 @@ PHOTOREAL_QUALITY_TOKENS: list[str] = [
     "professional photography",
     "raw photo",
     "true-to-life colors",
-    "anatomically correct breasts",
-    "natural nipples",
-    "realistic areolas proportional to the breast",
-    "natural nipple color matching skin undertone",
 ]
+
+# Nude anatomy guidance, kept out of the tail quality stack on purpose.
+#
+# Flux.1-dev's training set was NSFW-filtered, so its prior for bare chest
+# anatomy is weak and it defaults to smoothing the area over. The negative
+# prompt cannot correct this because Flux runs at CFG 1.0, where negative
+# conditioning has no effect. That leaves prompt position as the only lever:
+# these have to land early, next to the wardrobe clause, to do anything.
+# A dedicated anatomy/realism LoRA is the actual fix (see FluxPipelineParams
+# .detail_lora_name) because it restores the missing prior.
+NUDE_ANATOMY_DETAIL = (
+    "anatomically correct bare chest, clearly defined natural nipples, "
+    "soft-edged areolas slightly darker than the surrounding skin, "
+    "fine skin detail in sharp focus"
+)
+NUDE_ANATOMY_TAGS = "anatomically correct nipples and areolas, sharp skin detail"
 
 # Age-positive tokens encouraged in subject line
 ADULT_APPEARANCE_TOKENS: list[str] = [

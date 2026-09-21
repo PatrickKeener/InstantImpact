@@ -4,7 +4,7 @@
     "description": "Flux FP8 still with CLIPTextEncodeFlux: CLIP-L gets shot intent, T5 gets the full prompt. KSampler CFG remains 1.0.",
     "required_custom_nodes": [],
     "checkpoint": "flux1-dev-fp8.safetensors (ComfyUI/models/checkpoints/)",
-    "note": "CLIPTextEncodeFlux is a built-in Flux node (no extra weights). Identity lock still via prompt + later LoRA graph."
+    "note": "Node 12 is an optional anatomy/realism LoRA; the worker bypasses it when no detail_lora_name is set."
   },
   "4": {
     "class_type": "CheckpointLoaderSimple",
@@ -12,10 +12,20 @@
       "ckpt_name": "{{CKPT_NAME}}"
     }
   },
+  "12": {
+    "class_type": "LoraLoader",
+    "inputs": {
+      "lora_name": "{{DETAIL_LORA_NAME}}",
+      "strength_model": "{{DETAIL_LORA_STRENGTH}}",
+      "strength_clip": 0.0,
+      "model": ["4", 0],
+      "clip": ["4", 1]
+    }
+  },
   "6": {
     "class_type": "CLIPTextEncodeFlux",
     "inputs": {
-      "clip": ["4", 1],
+      "clip": ["12", 1],
       "clip_l": "{{CLIP_L_PROMPT}}",
       "t5xxl": "{{POSITIVE_PROMPT}}",
       "guidance": "{{GUIDANCE}}"
@@ -25,7 +35,7 @@
     "class_type": "CLIPTextEncode",
     "inputs": {
       "text": "{{NEGATIVE_PROMPT}}",
-      "clip": ["4", 1]
+      "clip": ["12", 1]
     }
   },
   "5": {
@@ -45,7 +55,7 @@
       "sampler_name": "euler",
       "scheduler": "simple",
       "denoise": 1.0,
-      "model": ["4", 0],
+      "model": ["12", 0],
       "positive": ["6", 0],
       "negative": ["7", 0],
       "latent_image": ["5", 0]

@@ -36,8 +36,45 @@ def test_anatomy_detail_only_used_for_revealing_shots():
     revealing, _ = render_flux_prompts(
         contract, theme="outdoor_day", outfit_hint="naked with see-through dress"
     )
-    assert "natural nipples" not in clothed
-    assert "natural nipples" in revealing
+    assert "nipple" not in clothed
+    assert "nipple" in revealing
+
+
+def test_anatomy_guidance_lands_early_in_both_encoders():
+    from instantimpact_prompts.render_flux import render_flux_encoder_prompts
+
+    contract = build_prompt_contract(
+        appearance=AppearanceProfile(hair_color="auburn", body_type="athletic"),
+        boundaries=BoundariesProfile(),
+        trigger_word="sks_aria_v1",
+    )
+    clip_l, t5, _ = render_flux_encoder_prompts(contract, theme="glamour", outfit_hint="topless")
+    # CLIP-L only has ~77 tokens, so anatomy has to be in it, not just T5
+    assert "nipple" in clip_l
+    # Flux ignores tail tokens, so anatomy must precede the quality stack
+    assert t5.index("nipple") < t5.index("raw photo")
+    assert t5.index("nipple") < t5.index("athletic")
+
+
+def test_legacy_contract_anatomy_tokens_are_not_duplicated():
+    contract = build_prompt_contract(
+        appearance=AppearanceProfile(hair_color="auburn"),
+        boundaries=BoundariesProfile(),
+        trigger_word="sks_aria_v1",
+    )
+    contract.quality_tokens = [
+        "raw photo",
+        "anatomically correct breasts",
+        "natural nipples",
+        "realistic areolas proportional to the breast",
+    ]
+    pos, _ = render_flux_prompts(contract, theme="glamour", outfit_hint="topless")
+    clauses = [c.strip() for c in pos.split(",")]
+    assert "natural nipples" not in clauses
+    assert "anatomically correct breasts" not in clauses
+    assert "realistic areolas proportional to the breast" not in clauses
+    assert pos.count("areola") == 1
+    assert "raw photo" in clauses
 
 
 def test_render_includes_product_placement():

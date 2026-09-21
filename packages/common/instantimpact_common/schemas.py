@@ -87,6 +87,11 @@ class SafetyConfirmations(BaseModel):
 class FluxPipelineParams(BaseModel):
     lora_strength: float = 0.85
     lora_clip_strength: float = 0.55
+    # Optional anatomy/realism LoRA in ComfyUI/models/loras. Flux.1-dev's nude
+    # prior is weak because its training data was filtered, so this is the only
+    # reliable way to get correct bare-chest anatomy.
+    detail_lora_name: str | None = None
+    detail_lora_strength: float = 0.6
     ip_adapter_strength: float = 0.6
     pulid_strength: float = 0.7
     # Flux Dev: KSampler CFG stays at 1.0; native guidance controls adherence.

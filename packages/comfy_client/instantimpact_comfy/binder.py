@@ -75,6 +75,34 @@ def nodes_only(workflow: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in workflow.items() if isinstance(v, dict) and "class_type" in v}
 
 
+def bypass_node(
+    workflow: dict[str, Any], node_id: str, output_map: dict[int, str]
+) -> dict[str, Any]:
+    """Remove an optional node and rewire its consumers to its own upstream inputs.
+
+    `output_map` maps each of the node's output slots to the input key that
+    passes through it, e.g. a LoraLoader is {0: "model", 1: "clip"}. Used for
+    slots that are only present when an operator configured a weight file, so
+    templates stay reviewable instead of multiplying per combination.
+    """
+    node = workflow.get(node_id)
+    if not isinstance(node, dict):
+        return workflow
+    sources = {slot: node.get("inputs", {})[key] for slot, key in output_map.items()}
+    pruned = {k: v for k, v in workflow.items() if k != node_id}
+
+    def rewire(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: rewire(v) for k, v in value.items()}
+        if isinstance(value, list):
+            if len(value) == 2 and value[0] == node_id and isinstance(value[1], int):
+                return sources[value[1]]
+            return [rewire(v) for v in value]
+        return value
+
+    return rewire(pruned)
+
+
 # Required keys for flux_still_character_v1 (CheckpointLoaderSimple / FP8 path)
 FLUX_STILL_REQUIRED_VARS = {
     "CKPT_NAME",
@@ -96,3 +124,9 @@ FLUX_STILL_LORA_REQUIRED_VARS = FLUX_STILL_REQUIRED_VARS | {
     "LORA_STRENGTH",
     "LORA_CLIP_STRENGTH",
 }
+
+# Optional anatomy/realism LoRA chained after the character LoRA. Bypassed via
+# bypass_node when no weight file is configured.
+DETAIL_LORA_NODE_ID = "12"
+DETAIL_LORA_OUTPUTS = {0: "model", 1: "clip"}
+DETAIL_LORA_VARS = {"DETAIL_LORA_NAME", "DETAIL_LORA_STRENGTH"}

@@ -228,9 +228,13 @@ async def _run_mock(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
 
 async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     from instantimpact_comfy.binder import (
+        DETAIL_LORA_NODE_ID,
+        DETAIL_LORA_OUTPUTS,
+        DETAIL_LORA_VARS,
         FLUX_STILL_LORA_REQUIRED_VARS,
         FLUX_STILL_REQUIRED_VARS,
         bind_workflow,
+        bypass_node,
         load_workflow,
         nodes_only,
         validate_placeholders,
@@ -256,6 +260,12 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         flux_params.get("lora_clip_strength")
         if flux_params.get("lora_clip_strength") is not None
         else 0.55
+    )
+    detail_lora_name = flux_params.get("detail_lora_name") or None
+    detail_lora_strength = float(
+        flux_params.get("detail_lora_strength")
+        if flux_params.get("detail_lora_strength") is not None
+        else 0.6
     )
     if not lora_name and snapshot.get("lora_path"):
         lp = str(snapshot["lora_path"])
@@ -307,6 +317,10 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         return {"ok": False}
 
     template = load_workflow(wf_path)
+    if detail_lora_name:
+        required = required | DETAIL_LORA_VARS
+    else:
+        template = bypass_node(template, DETAIL_LORA_NODE_ID, DETAIL_LORA_OUTPUTS)
     errors = validate_placeholders(template, required)
     if errors:
         await _publish(
@@ -406,6 +420,9 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             variables["LORA_NAME"] = lora_name
             variables["LORA_STRENGTH"] = lora_strength
             variables["LORA_CLIP_STRENGTH"] = lora_clip_strength
+        if detail_lora_name:
+            variables["DETAIL_LORA_NAME"] = detail_lora_name
+            variables["DETAIL_LORA_STRENGTH"] = detail_lora_strength
 
         try:
             bound = bind_workflow(template, variables)
@@ -460,6 +477,8 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
                 "lora_name": lora_name,
                 "lora_strength": lora_strength if use_lora else None,
                 "lora_clip_strength": lora_clip_strength if use_lora else None,
+                "detail_lora_name": detail_lora_name,
+                "detail_lora_strength": detail_lora_strength if detail_lora_name else None,
                 "clip_l_prompt": clip_l,
                 "ref_pack": str(refs) if refs else None,
                 **product_meta_from_item(item),

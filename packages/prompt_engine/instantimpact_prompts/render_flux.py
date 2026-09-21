@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from instantimpact_common.safety_lists import NUDE_ANATOMY_DETAIL, NUDE_ANATOMY_TAGS
 from instantimpact_common.schemas import PromptContract
 
 from instantimpact_prompts.product import product_prompt_fragment
@@ -57,6 +58,9 @@ def render_flux_encoder_prompts(
     else:
         # Character wardrobe is only a fallback; an explicit outfit replaces it
         shot_parts.extend(wardrobe_tokens)
+    # Anatomy guidance sits next to the wardrobe clause, not in the tail quality
+    # stack, because Flux's weak nude prior only responds to early tokens.
+    anatomy = NUDE_ANATOMY_DETAIL if revealing else None
     if pose_hint:
         shot_parts.append(pose_hint)
     if location_hint:
@@ -77,12 +81,12 @@ def render_flux_encoder_prompts(
     notes = _filter_notes_for_shot(contract.raw_notes, scene=scene, outfit=outfit)
     if notes:
         identity_parts.append(notes)
-    identity_parts.extend(
-        _filter_quality_for_shot(contract.quality_tokens, scene=scene, revealing=revealing)
-    )
+    identity_parts.extend(_filter_quality_for_shot(contract.quality_tokens, scene=scene))
 
-    clip_l = ", ".join(_dedupe_tokens(shot_parts))
-    t5 = ", ".join(_dedupe_tokens([*shot_parts, *identity_parts]))
+    clip_shot = [*shot_parts, NUDE_ANATOMY_TAGS] if anatomy else shot_parts
+    t5_shot = [*shot_parts, anatomy] if anatomy else shot_parts
+    clip_l = ", ".join(_dedupe_tokens(clip_shot))
+    t5 = ", ".join(_dedupe_tokens([*t5_shot, *identity_parts]))
     negative = ", ".join(_dedupe_tokens(contract.negative_tokens))
     return clip_l, t5, negative
 
@@ -137,12 +141,10 @@ def _filter_notes_for_shot(notes: str | None, *, scene: str, outfit: str) -> str
     return ", ".join(c for c in kept if c) or None
 
 
-def _filter_quality_for_shot(
-    quality_tokens: list[str], *, scene: str, revealing: bool
-) -> list[str]:
-    filtered = quality_tokens
-    if not revealing:
-        filtered = [q for q in filtered if not _contains_any(q, _ANATOMY_MARKERS)]
+def _filter_quality_for_shot(quality_tokens: list[str], *, scene: str) -> list[str]:
+    # Anatomy tokens are emitted early instead; strip any left in contracts
+    # written before that moved.
+    filtered = [q for q in quality_tokens if not _contains_any(q, _ANATOMY_MARKERS)]
     if _contains_any(scene, ("mm lens", "smartphone camera")):
         filtered = [q for q in filtered if q.lower() != "shot on 85mm lens"]
     return filtered
