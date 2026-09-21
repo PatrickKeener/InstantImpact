@@ -130,3 +130,10 @@ FLUX_STILL_LORA_REQUIRED_VARS = FLUX_STILL_REQUIRED_VARS | {
 DETAIL_LORA_NODE_ID = "12"
 DETAIL_LORA_OUTPUTS = {0: "model", 1: "clip"}
 DETAIL_LORA_VARS = {"DETAIL_LORA_NAME", "DETAIL_LORA_STRENGTH"}
+
+# Optional hi-res refinement: upscale the latent, then resample at low denoise so
+# small details get regenerated with more pixels to work with. Bypass order
+# matters — drop the sampler first so the decode falls back through the upscale
+# to the base sampler.
+HIRES_BYPASS_ORDER = (("14", {0: "latent_image"}), ("13", {0: "samples"}))
+HIRES_VARS = {"HIRES_WIDTH", "HIRES_HEIGHT", "HIRES_DENOISE"}

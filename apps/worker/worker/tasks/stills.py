@@ -233,6 +233,8 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         DETAIL_LORA_VARS,
         FLUX_STILL_LORA_REQUIRED_VARS,
         FLUX_STILL_REQUIRED_VARS,
+        HIRES_BYPASS_ORDER,
+        HIRES_VARS,
         bind_workflow,
         bypass_node,
         load_workflow,
@@ -266,6 +268,14 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         flux_params.get("detail_lora_strength")
         if flux_params.get("detail_lora_strength") is not None
         else 0.6
+    )
+    hires_fix = flux_params.get("hires_fix")
+    hires_fix = True if hires_fix is None else bool(hires_fix)
+    hires_scale = float(
+        flux_params.get("hires_scale") if flux_params.get("hires_scale") is not None else 1.5
+    )
+    hires_denoise = float(
+        flux_params.get("hires_denoise") if flux_params.get("hires_denoise") is not None else 0.4
     )
     if not lora_name and snapshot.get("lora_path"):
         lp = str(snapshot["lora_path"])
@@ -321,6 +331,11 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         required = required | DETAIL_LORA_VARS
     else:
         template = bypass_node(template, DETAIL_LORA_NODE_ID, DETAIL_LORA_OUTPUTS)
+    if hires_fix:
+        required = required | HIRES_VARS
+    else:
+        for node_id, outputs in HIRES_BYPASS_ORDER:
+            template = bypass_node(template, node_id, outputs)
     errors = validate_placeholders(template, required)
     if errors:
         await _publish(
@@ -423,6 +438,11 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         if detail_lora_name:
             variables["DETAIL_LORA_NAME"] = detail_lora_name
             variables["DETAIL_LORA_STRENGTH"] = detail_lora_strength
+        if hires_fix:
+            hires_w, hires_h = _hires_size(width, height, hires_scale)
+            variables["HIRES_WIDTH"] = hires_w
+            variables["HIRES_HEIGHT"] = hires_h
+            variables["HIRES_DENOISE"] = hires_denoise
 
         try:
             bound = bind_workflow(template, variables)
@@ -571,6 +591,16 @@ def _size_for_aspect(aspect: str, flux_params: dict) -> tuple[int, int]:
     ):
         return int(flux_params["width"]), int(flux_params["height"])
     return _ASPECT_SIZES.get(aspect, (1024, 1280))
+
+
+def _hires_size(width: int, height: int, scale: float) -> tuple[int, int]:
+    """Scale the latent target, snapped to /16 so the VAE decode stays clean."""
+    scale = min(max(scale, 1.0), 2.0)
+
+    def snap(value: int) -> int:
+        return max(16, round(value * scale / 16) * 16)
+
+    return snap(width), snap(height)
 
 
 def _ensure_adult_prompt(positive: str, *, age_appearance_min: int) -> str:

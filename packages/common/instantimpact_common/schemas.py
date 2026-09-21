@@ -92,6 +92,12 @@ class FluxPipelineParams(BaseModel):
     # reliable way to get correct bare-chest anatomy.
     detail_lora_name: str | None = None
     detail_lora_strength: float = 0.6
+    # Second low-denoise pass at higher resolution. Small features (nipples,
+    # jewellery, fabric weave) only resolve to a handful of latent pixels at
+    # base size, so this is what recovers them. Roughly doubles time per still.
+    hires_fix: bool = True
+    hires_scale: float = 1.5
+    hires_denoise: float = 0.4
     ip_adapter_strength: float = 0.6
     pulid_strength: float = 0.7
     # Flux Dev: KSampler CFG stays at 1.0; native guidance controls adherence.

@@ -63,9 +63,9 @@ def test_bypass_detail_lora_rewires_to_character_lora():
     pruned = bypass_node(wf, DETAIL_LORA_NODE_ID, DETAIL_LORA_OUTPUTS)
 
     assert DETAIL_LORA_NODE_ID not in pruned
-    sampler = next(n for n in pruned.values() if n.get("class_type") == "KSampler")
     encode = next(n for n in pruned.values() if n.get("class_type") == "CLIPTextEncodeFlux")
-    assert sampler["inputs"]["model"] == ["10", 0]
+    assert pruned["3"]["inputs"]["model"] == ["10", 0]
+    assert pruned["14"]["inputs"]["model"] == ["10", 0]
     assert encode["inputs"]["clip"] == ["10", 1]
     # No dangling placeholders for the slot we removed
     placeholders = extract_placeholders(pruned)
@@ -83,8 +83,60 @@ def test_bypass_detail_lora_in_base_graph_rewires_to_checkpoint():
     root = Path(__file__).resolve().parents[1]
     wf = load_workflow(root / "workflows" / "flux_still_character_v1.json")
     pruned = bypass_node(wf, DETAIL_LORA_NODE_ID, DETAIL_LORA_OUTPUTS)
-    sampler = next(n for n in pruned.values() if n.get("class_type") == "KSampler")
-    assert sampler["inputs"]["model"] == ["4", 0]
+    assert pruned["3"]["inputs"]["model"] == ["4", 0]
+    assert pruned["14"]["inputs"]["model"] == ["4", 0]
+
+
+def test_hires_pass_refines_the_base_latent_with_shared_conditioning():
+    root = Path(__file__).resolve().parents[1]
+    wf = load_workflow(root / "workflows" / "flux_still_character_lora_v1.json")
+
+    assert wf["13"]["inputs"]["samples"] == ["3", 0]
+    assert wf["14"]["inputs"]["latent_image"] == ["13", 0]
+    assert wf["14"]["inputs"]["positive"] == wf["3"]["inputs"]["positive"]
+    assert wf["14"]["inputs"]["negative"] == wf["3"]["inputs"]["negative"]
+    assert wf["8"]["inputs"]["samples"] == ["14", 0]
+
+
+def test_bypassing_hires_falls_back_to_the_base_latent():
+    from instantimpact_comfy.binder import (
+        FLUX_STILL_LORA_REQUIRED_VARS,
+        HIRES_BYPASS_ORDER,
+        bypass_node,
+        extract_placeholders,
+    )
+
+    root = Path(__file__).resolve().parents[1]
+    wf = load_workflow(root / "workflows" / "flux_still_character_lora_v1.json")
+    for node_id, outputs in HIRES_BYPASS_ORDER:
+        wf = bypass_node(wf, node_id, outputs)
+
+    assert "13" not in wf and "14" not in wf
+    assert wf["8"]["inputs"]["samples"] == ["3", 0]
+    placeholders = extract_placeholders(wf)
+    assert "HIRES_WIDTH" not in placeholders
+    assert "HIRES_DENOISE" not in placeholders
+    assert validate_placeholders(wf, FLUX_STILL_LORA_REQUIRED_VARS) == []
+
+
+def test_hires_and_detail_lora_can_both_be_bypassed():
+    from instantimpact_comfy.binder import (
+        DETAIL_LORA_NODE_ID,
+        DETAIL_LORA_OUTPUTS,
+        FLUX_STILL_REQUIRED_VARS,
+        HIRES_BYPASS_ORDER,
+        bypass_node,
+    )
+
+    root = Path(__file__).resolve().parents[1]
+    wf = load_workflow(root / "workflows" / "flux_still_character_v1.json")
+    wf = bypass_node(wf, DETAIL_LORA_NODE_ID, DETAIL_LORA_OUTPUTS)
+    for node_id, outputs in HIRES_BYPASS_ORDER:
+        wf = bypass_node(wf, node_id, outputs)
+
+    assert wf["8"]["inputs"]["samples"] == ["3", 0]
+    assert wf["3"]["inputs"]["model"] == ["4", 0]
+    assert validate_placeholders(wf, FLUX_STILL_REQUIRED_VARS) == []
 
 
 def test_bind_workflow_substitutes():

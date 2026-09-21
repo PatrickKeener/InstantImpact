@@ -4,7 +4,7 @@
     "description": "Flux FP8 + CLIPTextEncodeFlux + character LoRA with split model/clip strengths.",
     "checkpoint": "flux1-dev-fp8.safetensors",
     "lora": "ComfyUI/models/loras/{{LORA_NAME}}",
-    "note": "Node 12 is an optional anatomy/realism LoRA chained after the character LoRA; the worker bypasses it when no detail_lora_name is set."
+    "note": "Node 12 is an optional anatomy/realism LoRA chained after the character LoRA; nodes 13-14 are the optional hi-res refinement pass. The worker bypasses whichever are not configured."
   },
   "4": {
     "class_type": "CheckpointLoaderSimple",
@@ -71,10 +71,35 @@
       "latent_image": ["5", 0]
     }
   },
+  "13": {
+    "class_type": "LatentUpscale",
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "width": "{{HIRES_WIDTH}}",
+      "height": "{{HIRES_HEIGHT}}",
+      "crop": "disabled",
+      "samples": ["3", 0]
+    }
+  },
+  "14": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": "{{SEED}}",
+      "steps": "{{STEPS}}",
+      "cfg": "{{CFG}}",
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": "{{HIRES_DENOISE}}",
+      "model": ["12", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["13", 0]
+    }
+  },
   "8": {
     "class_type": "VAEDecode",
     "inputs": {
-      "samples": ["3", 0],
+      "samples": ["14", 0],
       "vae": ["4", 2]
     }
   },
