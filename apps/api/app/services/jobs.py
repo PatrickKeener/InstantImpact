@@ -213,6 +213,7 @@ async def _enqueue(
         pipeline_params=version.pipeline_params_json or {},
         boundaries=version.boundaries_json or {},
         appearance=version.appearance_json or {},
+        age_appearance_min=c.age_appearance_min,
         items=units,
         resume_on_item_failure=True,
         mock=(

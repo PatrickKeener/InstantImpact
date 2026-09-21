@@ -155,8 +155,8 @@ config:
         neg: ""
         seed: 42
         walk_seed: true
-        guidance_scale: 4
-        sample_steps: 20
+        guidance_scale: 2.5
+        sample_steps: 28
 meta:
   name: "[name]"
   version: "1.0"

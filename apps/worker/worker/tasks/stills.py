@@ -375,10 +375,9 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             product_description=item.get("product_description"),
             product_placement=item.get("product_placement"),
         )
-        if "adult" not in positive.lower() and "21" not in positive:
-            positive = (
-                f"adult woman 25 years old, {positive}" if positive else "adult woman 25 years old"
-            )
+        positive = _ensure_adult_prompt(
+            positive, age_appearance_min=int(snapshot.get("age_appearance_min") or 21)
+        )
         if trigger and trigger not in positive:
             positive = f"{trigger}, {positive}"
 
@@ -534,9 +533,22 @@ def _resolve_data_dir(request_path: Path) -> Path:
 
 
 def _size_for_aspect(aspect: str, flux_params: dict) -> tuple[int, int]:
-    if flux_params.get("width") and flux_params.get("height"):
+    if (
+        flux_params.get("override_dimensions")
+        and flux_params.get("width")
+        and flux_params.get("height")
+    ):
         return int(flux_params["width"]), int(flux_params["height"])
     return _ASPECT_SIZES.get(aspect, (1024, 1280))
+
+
+def _ensure_adult_prompt(positive: str, *, age_appearance_min: int) -> str:
+    """Add the character's actual adult age floor only when the contract omitted one."""
+    if "adult" in positive.lower() or "21" in positive:
+        return positive
+    age = max(21, age_appearance_min)
+    prefix = f"clearly adult woman, {age}+ appearance"
+    return f"{prefix}, {positive}" if positive else prefix
 
 
 async def _publish(redis: Any, event: dict) -> None:

@@ -230,10 +230,10 @@ async def create_character(db: AsyncSession, payload: CharacterCreate) -> dict:
     await db.flush()
 
     layout = get_layout()
-    vdir = layout.version_dir(character.id, 1)
-    for sub in (layout.refs_dir(character.id, 1), layout.lora_dir(character.id, 1), layout.dataset_dir(character.id, 1)):
+    refs_dir = layout.refs_dir(character.id, 1)
+    for sub in (refs_dir, layout.lora_dir(character.id, 1), layout.dataset_dir(character.id, 1)):
         sub.mkdir(parents=True, exist_ok=True)
-    version.ref_pack_path = str(layout.refs_dir(character.id, 1))
+    version.ref_pack_path = str(refs_dir.relative_to(layout.root)).replace("\\", "/")
 
     await db.commit()
     return character_to_out(await get_character(db, character.id))
@@ -253,6 +253,8 @@ async def update_character(db: AsyncSession, character_id: str, payload: Charact
         # Edits to a locked character create a new drafting version (retrain track) for profile changes only
         # Profile-only edits on ready: update a new drafting version without demoting ready
         next_int = max(v.version_int for v in c.versions) + 1
+        layout = get_layout()
+        refs_dir = layout.refs_dir(c.id, next_int)
         version = CharacterVersion(
             character_id=c.id,
             version_int=next_int,
@@ -267,15 +269,14 @@ async def update_character(db: AsyncSession, character_id: str, payload: Charact
             pipeline_params_json=dict(version.pipeline_params_json or {}),
             prompt_contract_json=dict(version.prompt_contract_json or {}),
             safety_profile_json=dict(version.safety_profile_json or {}),
-            ref_pack_path=version.ref_pack_path,
+            ref_pack_path=str(refs_dir.relative_to(layout.root)).replace("\\", "/"),
             lora_path=None,
         )
         db.add(version)
         await db.flush()
         c.retrain_version_id = version.id
-        layout = get_layout()
         for sub in (
-            layout.refs_dir(c.id, next_int),
+            refs_dir,
             layout.lora_dir(c.id, next_int),
             layout.dataset_dir(c.id, next_int),
         ):

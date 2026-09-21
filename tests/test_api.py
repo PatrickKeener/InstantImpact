@@ -76,6 +76,14 @@ def test_media_rejects_traversal(client: TestClient):
     assert r.status_code in (400, 404)
 
 
+def test_character_ref_pack_path_is_portable(client: TestClient):
+    character = _create_attested(client, "Portable Refs")
+    ref_path = character["current_version"]["ref_pack_path"]
+    assert ref_path.startswith("characters/")
+    assert "\\" not in ref_path
+    assert ":" not in ref_path
+
+
 def test_seed_gallery_requires_attest(client: TestClient):
     r = client.post("/api/characters", json={"display_name": "No Attest"})
     assert r.status_code == 200

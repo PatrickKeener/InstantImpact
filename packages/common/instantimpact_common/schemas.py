@@ -88,11 +88,14 @@ class FluxPipelineParams(BaseModel):
     lora_strength: float = 0.85
     ip_adapter_strength: float = 0.6
     pulid_strength: float = 0.7
-    # FP8 checkpoint: CFG ~1.0; more steps usually = cleaner photoreal detail
+    # Flux Dev: KSampler CFG stays at 1.0; native guidance controls adherence.
     steps: int = 28
     cfg: float = 1.0
-    width: int = 1024
-    height: int = 1280
+    guidance: float = 2.5
+    # Aspect presets win unless an operator explicitly enables a dimension override.
+    override_dimensions: bool = False
+    width: int | None = None
+    height: int | None = None
 
 
 class PipelineParams(BaseModel):
@@ -162,6 +165,7 @@ class JobRequestSnapshot(BaseModel):
     pipeline_params: dict[str, Any] = Field(default_factory=dict)
     boundaries: dict[str, Any] = Field(default_factory=dict)
     appearance: dict[str, Any] = Field(default_factory=dict)
+    age_appearance_min: int = 21
     items: list[StillUnitRequest] = Field(default_factory=list)
     resume_on_item_failure: bool = True
     mock: bool = False

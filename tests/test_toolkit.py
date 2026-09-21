@@ -16,6 +16,8 @@ def test_yaml_includes_trigger_and_paths():
     assert "is_flux: true" in y
     assert "/data/characters/x/versions/v001/dataset" in y
     assert "steps: 1500" in y
+    assert "guidance_scale: 2.5" in y
+    assert "sample_steps: 28" in y
 
 
 def test_lora_train_allowed_while_training_status():
