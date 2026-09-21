@@ -44,6 +44,71 @@ def test_render_includes_product_placement():
     assert "product" in pos.lower()
 
 
+def test_shot_intent_outranks_character_defaults():
+    contract = build_prompt_contract(
+        appearance=AppearanceProfile(
+            hair_color="auburn",
+            style_keywords=["glamour photography", "soft studio light", "natural window light"],
+            typical_wardrobe=["silk slip", "barely-there lingerie"],
+            freeform_notes="works nude and naked as well as clothed, tasteful erotic photography",
+        ),
+        boundaries=BoundariesProfile(),
+        trigger_word="sks_aria_v1",
+    )
+    pos, _ = render_flux_prompts(
+        contract, theme="outdoor_day", outfit_hint="naked with see through dress"
+    )
+    # Character wardrobe is replaced, not merged, when the shot names an outfit
+    assert "silk slip" not in pos
+    assert "naked with see through dress" in pos
+    # Indoor lighting defaults must not fight an outdoor scene
+    assert "studio light" not in pos
+    assert "window light" not in pos
+    # The "as well as clothed" hedge would undo an explicit nude outfit
+    assert "clothed" not in pos
+    # Scene and outfit land ahead of the character's style defaults
+    assert pos.index("outdoor daylight") < pos.index("glamour photography")
+    assert pos.index("naked with see through dress") < pos.index("glamour photography")
+
+
+def test_wardrobe_used_when_shot_has_no_outfit():
+    contract = build_prompt_contract(
+        appearance=AppearanceProfile(typical_wardrobe=["silk slip"]),
+        boundaries=BoundariesProfile(),
+        trigger_word="sks_aria_v1",
+    )
+    pos, _ = render_flux_prompts(contract, theme="portrait")
+    assert "silk slip" in pos
+
+
+def test_legacy_contract_wardrobe_style_token_is_dropped_for_outfit():
+    contract = build_prompt_contract(
+        appearance=AppearanceProfile(hair_color="blonde"),
+        boundaries=BoundariesProfile(),
+        trigger_word="sks_legacy_v1",
+    )
+    contract.style_tokens = ["wardrobe: silk slip, robe open", "raw photo"]
+    pos, _ = render_flux_prompts(contract, theme="portrait", outfit_hint="denim jacket")
+    assert "silk slip" not in pos
+    assert "robe open" not in pos
+    assert "wearing denim jacket" in pos
+    assert "raw photo" in pos
+
+
+def test_render_deduplicates_repeated_tokens():
+    contract = build_prompt_contract(
+        appearance=AppearanceProfile(
+            hair_color="auburn",
+            freeform_notes="auburn, real human skin texture, photorealistic photograph",
+        ),
+        boundaries=BoundariesProfile(),
+        trigger_word="sks_aria_v1",
+    )
+    pos, _ = render_flux_prompts(contract, theme="portrait")
+    tokens = [t.strip().lower() for t in pos.split(",")]
+    assert len(tokens) == len(set(tokens))
+
+
 def test_product_prompt_fragment_defaults():
     assert product_prompt_fragment(name=None) is None
     frag = product_prompt_fragment(name="Vial X", placement="featured")

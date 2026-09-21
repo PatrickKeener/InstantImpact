@@ -46,8 +46,7 @@ def build_prompt_contract(
 
     appearance_tokens.extend(f.strip() for f in appearance.distinguishing_features if f.strip())
     style_tokens = [s.strip() for s in appearance.style_keywords if s.strip()]
-    if appearance.typical_wardrobe:
-        style_tokens.append("wardrobe: " + ", ".join(appearance.typical_wardrobe))
+    wardrobe_tokens = [w.strip() for w in appearance.typical_wardrobe if w.strip()]
 
     subject_tokens = list(ADULT_APPEARANCE_TOKENS)
     if trigger_word:
@@ -91,6 +90,7 @@ def build_prompt_contract(
         subject_tokens=subject_tokens,
         appearance_tokens=appearance_tokens,
         style_tokens=style_tokens,
+        wardrobe_tokens=wardrobe_tokens,
         quality_tokens=quality_tokens,
         negative_tokens=negative,
         trigger_word=trigger_word,

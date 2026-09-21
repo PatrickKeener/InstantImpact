@@ -105,6 +105,7 @@ class PromptContract(BaseModel):
     subject_tokens: list[str] = Field(default_factory=list)
     appearance_tokens: list[str] = Field(default_factory=list)
     style_tokens: list[str] = Field(default_factory=list)
+    wardrobe_tokens: list[str] = Field(default_factory=list)
     quality_tokens: list[str] = Field(default_factory=list)
     negative_tokens: list[str] = Field(default_factory=list)
     trigger_word: str | None = None
