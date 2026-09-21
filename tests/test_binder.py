@@ -20,14 +20,16 @@ def test_flux_template_has_required_placeholders():
     errors_l = validate_placeholders(wf_l, FLUX_STILL_LORA_REQUIRED_VARS)
     assert errors_l == []
     for template in (wf, wf_l):
-        guidance = next(
-            node for node in template.values() if node.get("class_type") == "FluxGuidance"
-        )
         sampler = next(node for node in template.values() if node.get("class_type") == "KSampler")
-        assert guidance["inputs"]["guidance"] == "{{GUIDANCE}}"
+        encode = next(
+            node for node in template.values() if node.get("class_type") == "CLIPTextEncodeFlux"
+        )
+        assert encode["inputs"]["clip_l"] == "{{CLIP_L_PROMPT}}"
+        assert encode["inputs"]["t5xxl"] == "{{POSITIVE_PROMPT}}"
+        assert encode["inputs"]["guidance"] == "{{GUIDANCE}}"
         assert sampler["inputs"]["cfg"] == "{{CFG}}"
         assert sampler["inputs"]["positive"][0] in template
-        assert template[sampler["inputs"]["positive"][0]]["class_type"] == "FluxGuidance"
+        assert template[sampler["inputs"]["positive"][0]]["class_type"] == "CLIPTextEncodeFlux"
 
 
 def test_bind_workflow_substitutes():

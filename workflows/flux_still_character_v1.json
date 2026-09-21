@@ -1,10 +1,10 @@
 {
   "_meta": {
     "name": "flux_still_character_v1",
-    "description": "Flux still via CheckpointLoaderSimple (FP8 single-file) with native FluxGuidance. KSampler CFG remains 1.0.",
+    "description": "Flux FP8 still with CLIPTextEncodeFlux: CLIP-L gets shot intent, T5 gets the full prompt. KSampler CFG remains 1.0.",
     "required_custom_nodes": [],
     "checkpoint": "flux1-dev-fp8.safetensors (ComfyUI/models/checkpoints/)",
-    "note": "No LoRA/IP-Adapter in this graph yet — identity lock via prompt contract + later LoRA graph revision."
+    "note": "CLIPTextEncodeFlux is a built-in Flux node (no extra weights). Identity lock still via prompt + later LoRA graph."
   },
   "4": {
     "class_type": "CheckpointLoaderSimple",
@@ -13,17 +13,12 @@
     }
   },
   "6": {
-    "class_type": "CLIPTextEncode",
+    "class_type": "CLIPTextEncodeFlux",
     "inputs": {
-      "text": "{{POSITIVE_PROMPT}}",
-      "clip": ["4", 1]
-    }
-  },
-  "11": {
-    "class_type": "FluxGuidance",
-    "inputs": {
-      "guidance": "{{GUIDANCE}}",
-      "conditioning": ["6", 0]
+      "clip": ["4", 1],
+      "clip_l": "{{CLIP_L_PROMPT}}",
+      "t5xxl": "{{POSITIVE_PROMPT}}",
+      "guidance": "{{GUIDANCE}}"
     }
   },
   "7": {
@@ -51,7 +46,7 @@
       "scheduler": "simple",
       "denoise": 1.0,
       "model": ["4", 0],
-      "positive": ["11", 0],
+      "positive": ["6", 0],
       "negative": ["7", 0],
       "latent_image": ["5", 0]
     }

@@ -24,6 +24,9 @@ type BriefLine = {
   theme: string;
   count: number;
   outfit: string;
+  location: string;
+  extra: string;
+  pose: string;
   useProduct: boolean;
   productId: string;
   productPlacement: string;
@@ -47,6 +50,9 @@ export default function CharacterStudio() {
       theme: "casual_bedroom",
       count: 4,
       outfit: "oversized tee",
+      location: "",
+      extra: "",
+      pose: "",
       useProduct: false,
       productId: "",
       productPlacement: "holding",
@@ -155,7 +161,9 @@ export default function CharacterStudio() {
           count: l.count,
           theme: l.theme,
           outfit_hint: l.outfit || undefined,
-          pose_hint: "relaxed natural pose",
+          pose_hint: l.pose || undefined,
+          location_hint: l.location || undefined,
+          extra_prompt: l.extra || undefined,
           product_id: l.useProduct && l.productId ? l.productId : undefined,
           product_placement:
             l.useProduct && l.productId ? l.productPlacement || "holding" : undefined,
@@ -457,8 +465,8 @@ export default function CharacterStudio() {
         <section className="card space-y-4 p-5">
           <h2 className="font-display text-xl">Batch stills</h2>
           <p className="text-xs text-slate-500">
-            Add brief lines (theme × count). Optionally toggle a product reference per line for
-            ad-style stills.
+            Add brief lines (theme × count). Location, pose, and extra request go into CLIP-L
+            so Flux actually sees what you asked for.
           </p>
           {lines.map((line, idx) => (
             <div key={idx} className="space-y-2 rounded-xl bg-white/[0.03] p-3">
@@ -508,6 +516,38 @@ export default function CharacterStudio() {
                 >
                   ✕
                 </button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <input
+                  className="input"
+                  value={line.location}
+                  placeholder="location (e.g. park in daylight)"
+                  onChange={(e) => {
+                    const next = [...lines];
+                    next[idx] = { ...line, location: e.target.value };
+                    setLines(next);
+                  }}
+                />
+                <input
+                  className="input"
+                  value={line.pose}
+                  placeholder="pose (optional)"
+                  onChange={(e) => {
+                    const next = [...lines];
+                    next[idx] = { ...line, pose: e.target.value };
+                    setLines(next);
+                  }}
+                />
+                <input
+                  className="input"
+                  value={line.extra}
+                  placeholder="extra request (exact wording)"
+                  onChange={(e) => {
+                    const next = [...lines];
+                    next[idx] = { ...line, extra: e.target.value };
+                    setLines(next);
+                  }}
+                />
               </div>
               <label className="flex items-center gap-2 text-xs text-slate-400">
                 <input
@@ -591,6 +631,9 @@ export default function CharacterStudio() {
                     theme: "portrait",
                     count: 2,
                     outfit: "",
+                    location: "",
+                    extra: "",
+                    pose: "",
                     useProduct: false,
                     productId: "",
                     productPlacement: "holding",

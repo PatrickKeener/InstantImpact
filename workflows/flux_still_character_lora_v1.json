@@ -1,7 +1,7 @@
 {
   "_meta": {
     "name": "flux_still_character_lora_v1",
-    "description": "Flux FP8 checkpoint + native FluxGuidance + character LoRA. Use when version has comfy_lora_name.",
+    "description": "Flux FP8 + CLIPTextEncodeFlux + character LoRA with split model/clip strengths.",
     "checkpoint": "flux1-dev-fp8.safetensors",
     "lora": "ComfyUI/models/loras/{{LORA_NAME}}"
   },
@@ -16,23 +16,18 @@
     "inputs": {
       "lora_name": "{{LORA_NAME}}",
       "strength_model": "{{LORA_STRENGTH}}",
-      "strength_clip": "{{LORA_STRENGTH}}",
+      "strength_clip": "{{LORA_CLIP_STRENGTH}}",
       "model": ["4", 0],
       "clip": ["4", 1]
     }
   },
   "6": {
-    "class_type": "CLIPTextEncode",
+    "class_type": "CLIPTextEncodeFlux",
     "inputs": {
-      "text": "{{POSITIVE_PROMPT}}",
-      "clip": ["10", 1]
-    }
-  },
-  "11": {
-    "class_type": "FluxGuidance",
-    "inputs": {
-      "guidance": "{{GUIDANCE}}",
-      "conditioning": ["6", 0]
+      "clip": ["10", 1],
+      "clip_l": "{{CLIP_L_PROMPT}}",
+      "t5xxl": "{{POSITIVE_PROMPT}}",
+      "guidance": "{{GUIDANCE}}"
     }
   },
   "7": {
@@ -60,7 +55,7 @@
       "scheduler": "simple",
       "denoise": 1.0,
       "model": ["10", 0],
-      "positive": ["11", 0],
+      "positive": ["6", 0],
       "negative": ["7", 0],
       "latent_image": ["5", 0]
     }

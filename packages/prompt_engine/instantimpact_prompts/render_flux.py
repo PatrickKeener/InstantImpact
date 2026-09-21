@@ -14,7 +14,7 @@ _REVEALING_MARKERS = ("nude", "naked", "topless", "see-through", "see through", 
 _ANATOMY_MARKERS = ("breast", "nipple", "areola")
 
 
-def render_flux_prompts(
+def render_flux_encoder_prompts(
     contract: PromptContract | dict,
     *,
     theme: str = "portrait",
@@ -25,12 +25,11 @@ def render_flux_prompts(
     product_name: str | None = None,
     product_description: str | None = None,
     product_placement: str | None = None,
-) -> tuple[str, str]:
-    """Return (positive, negative) prompt strings for Flux.
+) -> tuple[str, str, str]:
+    """Return (clip_l, t5, negative) for Flux's dual text encoders.
 
-    Per-shot intent (theme, outfit, pose, location) is emitted ahead of the
-    character's default style/wardrobe so it survives both Flux's early-token
-    bias and the 77-token CLIP-L window.
+    CLIP-L is capped at ~77 tokens, so it only gets identity + the requested
+    shot (theme, outfit, pose, location, extra). T5 gets the full prompt.
     """
     if isinstance(contract, dict):
         contract = PromptContract.model_validate(contract)
@@ -41,49 +40,60 @@ def render_flux_prompts(
     exposure = outfit or ", ".join(wardrobe_tokens)
     revealing = _contains_any(exposure, _REVEALING_MARKERS)
 
-    parts: list[str] = []
+    shot_parts: list[str] = []
     # Lead with photo intent — Flux weights early tokens heavily
-    parts.append("photorealistic photograph")
-    parts.extend(contract.subject_tokens)
+    shot_parts.append("photorealistic photograph")
+    shot_parts.extend(contract.subject_tokens)
 
     # Shot-specific instructions must precede detailed identity attributes so
     # both Flux text encoders receive the requested scene and wardrobe.
-    parts.append(scene)
+    shot_parts.append(scene)
     if outfit:
         # Avoid "wearing nude" awkwardness; pass outfit as-is if it already describes state
         if outfit.lower().startswith(_OUTFIT_STATE_PREFIXES):
-            parts.append(outfit)
+            shot_parts.append(outfit)
         else:
-            parts.append(f"wearing {outfit}")
+            shot_parts.append(f"wearing {outfit}")
     else:
         # Character wardrobe is only a fallback; an explicit outfit replaces it
-        parts.extend(wardrobe_tokens)
+        shot_parts.extend(wardrobe_tokens)
     if pose_hint:
-        parts.append(pose_hint)
+        shot_parts.append(pose_hint)
     if location_hint:
-        parts.append(f"location: {location_hint}")
+        shot_parts.append(location_hint.strip())
     product_clause = product_prompt_fragment(
         name=product_name,
         description=product_description,
         placement=product_placement,
     )
     if product_clause:
-        parts.append(product_clause)
+        shot_parts.append(product_clause)
     if extra_prompt:
-        parts.append(extra_prompt)
+        shot_parts.append(extra_prompt)
 
-    parts.extend(contract.appearance_tokens)
-    parts.extend(_filter_style_for_shot(style_tokens, scene=scene, outfit=outfit))
+    identity_parts: list[str] = []
+    identity_parts.extend(contract.appearance_tokens)
+    identity_parts.extend(_filter_style_for_shot(style_tokens, scene=scene, outfit=outfit))
     notes = _filter_notes_for_shot(contract.raw_notes, scene=scene, outfit=outfit)
     if notes:
-        parts.append(notes)
-    parts.extend(
+        identity_parts.append(notes)
+    identity_parts.extend(
         _filter_quality_for_shot(contract.quality_tokens, scene=scene, revealing=revealing)
     )
 
-    positive = ", ".join(_dedupe_tokens(parts))
+    clip_l = ", ".join(_dedupe_tokens(shot_parts))
+    t5 = ", ".join(_dedupe_tokens([*shot_parts, *identity_parts]))
     negative = ", ".join(_dedupe_tokens(contract.negative_tokens))
-    return positive, negative
+    return clip_l, t5, negative
+
+
+def render_flux_prompts(
+    contract: PromptContract | dict,
+    **hints: str | None,
+) -> tuple[str, str]:
+    """Return (t5/full positive, negative). CLIP-L is dropped for mock/preview callers."""
+    _, t5, negative = render_flux_encoder_prompts(contract, **hints)
+    return t5, negative
 
 
 def _split_wardrobe(contract: PromptContract) -> tuple[list[str], list[str]]:

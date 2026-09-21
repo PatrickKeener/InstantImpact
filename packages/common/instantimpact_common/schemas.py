@@ -86,6 +86,7 @@ class SafetyConfirmations(BaseModel):
 
 class FluxPipelineParams(BaseModel):
     lora_strength: float = 0.85
+    lora_clip_strength: float = 0.55
     ip_adapter_strength: float = 0.6
     pulid_strength: float = 0.7
     # Flux Dev: KSampler CFG stays at 1.0; native guidance controls adherence.

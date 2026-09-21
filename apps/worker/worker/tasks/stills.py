@@ -237,7 +237,7 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     )
     from instantimpact_comfy.client import ComfyClient, ComfyClientError
     from instantimpact_common.offline import enforce_strict_offline
-    from instantimpact_prompts.render_flux import render_flux_prompts
+    from instantimpact_prompts.render_flux import render_flux_encoder_prompts
 
     job_id = snapshot["job_id"]
     character_id = snapshot.get("character_id") or "unknown"
@@ -251,6 +251,11 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     lora_name = flux_params.get("comfy_lora_name") or None
     lora_strength = float(
         flux_params.get("lora_strength") if flux_params.get("lora_strength") is not None else 0.85
+    )
+    lora_clip_strength = float(
+        flux_params.get("lora_clip_strength")
+        if flux_params.get("lora_clip_strength") is not None
+        else 0.55
     )
     if not lora_name and snapshot.get("lora_path"):
         lp = str(snapshot["lora_path"])
@@ -331,8 +336,8 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         return {"ok": False}
 
     default_steps = int(flux_params.get("steps") or 28)
-    # Flux Dev is guidance-distilled: traditional KSampler CFG must remain 1.0.
-    # Prompt adherence is controlled by the native FluxGuidance node instead.
+    # Flux Dev is guidance-distilled: KSampler CFG stays 1.0.
+    # Prompt adherence is the CLIPTextEncodeFlux guidance input.
     default_cfg = 1.0
     default_guidance = float(
         flux_params.get("guidance") if flux_params.get("guidance") is not None else 2.5
@@ -364,7 +369,7 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         aspect = item.get("aspect_ratio") or meta_aspect
         width, height = _size_for_aspect(aspect, flux_params)
 
-        positive, negative = render_flux_prompts(
+        clip_l, positive, negative = render_flux_encoder_prompts(
             contract,
             theme=theme,
             outfit_hint=item.get("outfit_hint"),
@@ -375,15 +380,18 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             product_description=item.get("product_description"),
             product_placement=item.get("product_placement"),
         )
-        positive = _ensure_adult_prompt(
-            positive, age_appearance_min=int(snapshot.get("age_appearance_min") or 21)
-        )
+        age_min = int(snapshot.get("age_appearance_min") or 21)
+        clip_l = _ensure_adult_prompt(clip_l, age_appearance_min=age_min)
+        positive = _ensure_adult_prompt(positive, age_appearance_min=age_min)
+        if trigger and trigger not in clip_l:
+            clip_l = f"{trigger}, {clip_l}"
         if trigger and trigger not in positive:
             positive = f"{trigger}, {positive}"
 
         prefix = f"ii_{job_id[:8]}_{item_index:03d}"
         variables = {
             "CKPT_NAME": ckpt_name,
+            "CLIP_L_PROMPT": clip_l,
             "POSITIVE_PROMPT": positive,
             "NEGATIVE_PROMPT": negative or "",
             "SEED": seed,
@@ -397,6 +405,7 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         if use_lora:
             variables["LORA_NAME"] = lora_name
             variables["LORA_STRENGTH"] = lora_strength
+            variables["LORA_CLIP_STRENGTH"] = lora_clip_strength
 
         try:
             bound = bind_workflow(template, variables)
@@ -449,6 +458,9 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
                 "job_id": job_id,
                 "seed": seed,
                 "lora_name": lora_name,
+                "lora_strength": lora_strength if use_lora else None,
+                "lora_clip_strength": lora_clip_strength if use_lora else None,
+                "clip_l_prompt": clip_l,
                 "ref_pack": str(refs) if refs else None,
                 **product_meta_from_item(item),
             }

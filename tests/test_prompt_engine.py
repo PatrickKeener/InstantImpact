@@ -86,6 +86,34 @@ def test_shot_intent_outranks_character_defaults():
     assert pos.index("clearly outdoors") < pos.index("auburn")
 
 
+def test_clip_l_keeps_shot_and_drops_character_quality_stack():
+    from instantimpact_prompts.render_flux import render_flux_encoder_prompts
+
+    contract = build_prompt_contract(
+        appearance=AppearanceProfile(
+            hair_color="auburn",
+            typical_wardrobe=["silk slip"],
+            freeform_notes="tasteful erotic photography",
+        ),
+        boundaries=BoundariesProfile(),
+        trigger_word="sks_aria_v1",
+    )
+    clip_l, t5, _ = render_flux_encoder_prompts(
+        contract,
+        theme="outdoor_day",
+        outfit_hint="naked with see through dress",
+        location_hint="sunlit meadow",
+        extra_prompt="see-through white dress, bare skin visible through fabric",
+    )
+    assert "sunlit meadow" in clip_l
+    assert "naked with see through dress" in clip_l
+    assert "see-through white dress" in clip_l
+    assert "natural pores" not in clip_l.lower()
+    assert "tasteful erotic photography" not in clip_l
+    assert "natural pores" in t5.lower() or "skin texture" in t5.lower()
+    assert "sunlit meadow" in t5
+
+
 def test_clothed_outfit_drops_nude_character_style():
     contract = build_prompt_contract(
         appearance=AppearanceProfile(

@@ -78,6 +78,7 @@ def nodes_only(workflow: dict[str, Any]) -> dict[str, Any]:
 # Required keys for flux_still_character_v1 (CheckpointLoaderSimple / FP8 path)
 FLUX_STILL_REQUIRED_VARS = {
     "CKPT_NAME",
+    "CLIP_L_PROMPT",
     "POSITIVE_PROMPT",
     "NEGATIVE_PROMPT",
     "SEED",
@@ -89,8 +90,9 @@ FLUX_STILL_REQUIRED_VARS = {
     "FILENAME_PREFIX",
 }
 
-# Base + character LoRA
+# Base + character LoRA (clip strength is lower so the shot request is not overwritten)
 FLUX_STILL_LORA_REQUIRED_VARS = FLUX_STILL_REQUIRED_VARS | {
     "LORA_NAME",
     "LORA_STRENGTH",
+    "LORA_CLIP_STRENGTH",
 }
