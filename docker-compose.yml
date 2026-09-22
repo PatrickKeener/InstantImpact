@@ -67,6 +67,9 @@ services:
       INSTANTIMPACT_REDIS_URL: redis://127.0.0.1:6379/0
       INSTANTIMPACT_COMFY_URL: http://127.0.0.1:8188
       INSTANTIMPACT_COMFY_CKPT_NAME: ${INSTANTIMPACT_COMFY_CKPT_NAME:-flux1-dev-fp8.safetensors}
+      # Per-prompt (one still) must stay well under the whole-job backstop.
+      INSTANTIMPACT_COMFY_TIMEOUT: ${INSTANTIMPACT_COMFY_TIMEOUT:-600}
+      INSTANTIMPACT_JOB_TIMEOUT: ${INSTANTIMPACT_JOB_TIMEOUT:-14400}
       INSTANTIMPACT_DATA_DIR: /app/data
       INSTANTIMPACT_WORKFLOWS_DIR: /app/workflows
       PYTHONPATH: /app/apps/worker:/app/apps/api:/app/packages/common:/app/packages/comfy_client:/app/packages/prompt_engine

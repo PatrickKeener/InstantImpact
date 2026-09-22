@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import io
 import json
@@ -71,6 +73,27 @@ async def process_still_job(
     try:
         await _publish(redis, {"job_id": job_id, "event": "running", "message": "GPU acquired"})
         return await _run_comfy(redis, snapshot, request_path=path)
+    except asyncio.CancelledError:
+        # arq's job_timeout (or a worker shutdown) killed us mid-batch. Without
+        # an event here the API never learns the job died, so the UI shows the
+        # already-written stills next to pending slots that never resolve.
+        # Shielded because we are already inside a cancellation.
+        with contextlib.suppress(Exception):
+            await asyncio.shield(
+                _publish(
+                    redis,
+                    {
+                        "job_id": job_id,
+                        "event": "failed",
+                        "error_code": "job_cancelled",
+                        "message": (
+                            "Worker cancelled mid-batch — usually the arq job timeout. "
+                            "Raise INSTANTIMPACT_JOB_TIMEOUT for large batches."
+                        ),
+                    },
+                )
+            )
+        raise
     finally:
         await lock.release()
 
