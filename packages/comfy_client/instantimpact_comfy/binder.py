@@ -115,6 +115,8 @@ FLUX_STILL_REQUIRED_VARS = {
     "STEPS",
     "CFG",
     "GUIDANCE",
+    "SAMPLER_NAME",
+    "SCHEDULER",
     "FILENAME_PREFIX",
 }
 
@@ -136,4 +138,12 @@ DETAIL_LORA_VARS = {"DETAIL_LORA_NAME", "DETAIL_LORA_STRENGTH"}
 # matters — drop the sampler first so the decode falls back through the upscale
 # to the base sampler.
 HIRES_BYPASS_ORDER = (("14", {0: "latent_image"}), ("13", {0: "samples"}))
-HIRES_VARS = {"HIRES_WIDTH", "HIRES_HEIGHT", "HIRES_DENOISE"}
+HIRES_VARS = {
+    "HIRES_WIDTH",
+    "HIRES_HEIGHT",
+    "HIRES_DENOISE",
+    # Separate from the base pass: finetunes commonly want a different sampler
+    # above ~1024px than they do at base resolution.
+    "HIRES_SAMPLER_NAME",
+    "HIRES_SCHEDULER",
+}

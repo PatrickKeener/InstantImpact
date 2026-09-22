@@ -277,6 +277,10 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     hires_denoise = float(
         flux_params.get("hires_denoise") if flux_params.get("hires_denoise") is not None else 0.4
     )
+    sampler_name = str(flux_params.get("sampler_name") or "euler")
+    scheduler = str(flux_params.get("scheduler") or "simple")
+    hires_sampler_name = str(flux_params.get("hires_sampler_name") or sampler_name)
+    hires_scheduler = str(flux_params.get("hires_scheduler") or scheduler)
     if not lora_name and snapshot.get("lora_path"):
         lp = str(snapshot["lora_path"])
         if lp.endswith(".safetensors"):
@@ -429,6 +433,8 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             "STEPS": int(item.get("steps") or default_steps),
             "CFG": default_cfg,
             "GUIDANCE": default_guidance,
+            "SAMPLER_NAME": sampler_name,
+            "SCHEDULER": scheduler,
             "FILENAME_PREFIX": prefix,
         }
         if use_lora:
@@ -443,6 +449,8 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             variables["HIRES_WIDTH"] = hires_w
             variables["HIRES_HEIGHT"] = hires_h
             variables["HIRES_DENOISE"] = hires_denoise
+            variables["HIRES_SAMPLER_NAME"] = hires_sampler_name
+            variables["HIRES_SCHEDULER"] = hires_scheduler
 
         try:
             bound = bind_workflow(template, variables)

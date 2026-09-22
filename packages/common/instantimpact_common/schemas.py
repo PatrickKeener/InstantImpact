@@ -98,6 +98,13 @@ class FluxPipelineParams(BaseModel):
     hires_fix: bool = True
     hires_scale: float = 1.5
     hires_denoise: float = 0.4
+    # Sampler is per-checkpoint, not universal. Stock Flux.1-dev is happy with
+    # euler/simple throughout; several Flux finetunes recommend a different
+    # pairing above ~1024px, which is exactly where the hi-res pass runs.
+    sampler_name: str = "euler"
+    scheduler: str = "simple"
+    hires_sampler_name: str = "euler"
+    hires_scheduler: str = "simple"
     ip_adapter_strength: float = 0.6
     pulid_strength: float = 0.7
     # Flux Dev: KSampler CFG stays at 1.0; native guidance controls adherence.

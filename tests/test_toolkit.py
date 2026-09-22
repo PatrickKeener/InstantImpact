@@ -1,5 +1,10 @@
 from instantimpact_common.safety import validate_for_enqueue
-from instantimpact_common.toolkit import find_trained_weights, render_flux_lora_yaml
+from instantimpact_common.toolkit import (
+    DEFAULT_TRAIN_BASE_MODEL,
+    find_trained_weights,
+    render_flux_lora_yaml,
+    resolve_train_base_model,
+)
 
 
 def test_yaml_includes_trigger_and_paths():
@@ -18,6 +23,40 @@ def test_yaml_includes_trigger_and_paths():
     assert "steps: 1500" in y
     assert "guidance_scale: 2.5" in y
     assert "sample_steps: 28" in y
+
+
+def test_yaml_defaults_to_stock_flux_base():
+    y = render_flux_lora_yaml(
+        name="n",
+        trigger_word="t",
+        dataset_dir="/d",
+        training_folder="/f",
+    )
+    assert f'name_or_path: "{DEFAULT_TRAIN_BASE_MODEL}"' in y
+
+
+def test_yaml_can_target_a_finetuned_base():
+    y = render_flux_lora_yaml(
+        name="n",
+        trigger_word="t",
+        dataset_dir="/d",
+        training_folder="/f",
+        base_model="/models/flux-unfiltered",
+    )
+    assert 'name_or_path: "/models/flux-unfiltered"' in y
+    assert DEFAULT_TRAIN_BASE_MODEL not in y
+
+
+def test_train_base_model_reads_env_override(monkeypatch):
+    monkeypatch.setenv("INSTANTIMPACT_TRAIN_BASE_MODEL", "/models/other-base")
+    assert resolve_train_base_model() == "/models/other-base"
+    y = render_flux_lora_yaml(name="n", trigger_word="t", dataset_dir="/d", training_folder="/f")
+    assert 'name_or_path: "/models/other-base"' in y
+
+
+def test_train_base_model_ignores_blank_env(monkeypatch):
+    monkeypatch.setenv("INSTANTIMPACT_TRAIN_BASE_MODEL", "   ")
+    assert resolve_train_base_model() == DEFAULT_TRAIN_BASE_MODEL
 
 
 def test_lora_train_allowed_while_training_status():

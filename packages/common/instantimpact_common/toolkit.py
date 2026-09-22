@@ -83,6 +83,21 @@ def _yaml_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
+DEFAULT_TRAIN_BASE_MODEL = "black-forest-labs/FLUX.1-dev"
+
+
+def resolve_train_base_model() -> str:
+    """Base weights to train the character LoRA against.
+
+    Keep this matched to the checkpoint used at inference. Training against
+    stock FLUX.1-dev while sampling from a finetune costs identity fidelity,
+    because the LoRA is a delta against weights the sampler no longer has.
+    """
+    return (
+        os.environ.get("INSTANTIMPACT_TRAIN_BASE_MODEL") or ""
+    ).strip() or DEFAULT_TRAIN_BASE_MODEL
+
+
 def render_flux_lora_yaml(
     *,
     name: str,
@@ -92,12 +107,14 @@ def render_flux_lora_yaml(
     steps: int = 1500,
     lr: str = "1e-4",
     linear: int = 16,
+    base_model: str | None = None,
 ) -> str:
     """AI Toolkit extension job YAML, matching the Sienna/nemesis Flux LoRA recipe."""
     name = _yaml_escape(name)
     trigger = _yaml_escape(trigger_word)
     dataset = _yaml_escape(dataset_dir.replace("\\", "/"))
     folder = _yaml_escape(training_folder.replace("\\", "/"))
+    base = _yaml_escape(base_model or resolve_train_base_model())
     steps = max(200, min(int(steps), 4000))
     return f"""---
 job: extension
@@ -139,7 +156,7 @@ config:
           ema_decay: 0.99
         dtype: bf16
       model:
-        name_or_path: "black-forest-labs/FLUX.1-dev"
+        name_or_path: "{base}"
         is_flux: true
         quantize: true
       sample:
