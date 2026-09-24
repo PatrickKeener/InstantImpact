@@ -26,17 +26,35 @@ What changed:
 
 Stay on **Flux architecture** so existing graphs and LoRAs load. SDXL is a later rewrite.
 
-1. Download a **bf16** Flux.1-dev (or a Flux-arch photoreal finetune) into `ComfyUI/models/checkpoints/`.
+BF16 Flux.1-dev is **not** a drop-in replacement for the fp8 file. Black Forest Labs publishes it as a bare diffusion model: no CLIP-L, no T5-XXL, no VAE. Dropping it into `models/checkpoints/` and pointing `INSTANTIMPACT_COMFY_CKPT_NAME` at it makes `CheckpointLoaderSimple` hand `CLIPTextEncode` a null clip, Comfy accepts the prompt over HTTP and then fails at execution with `clip input is invalid: None`. Use the split-loader path instead.
+
+1. Put each component in its own Comfy directory:
+
+| File | Directory | Size |
+|------|-----------|------|
+| `flux1-dev.safetensors` | `models/diffusion_models/` | 23.8 GB |
+| `clip_l.safetensors` | `models/clip/` | 246 MB |
+| `t5xxl_fp16.safetensors` | `models/clip/` | 9.8 GB |
+| `ae.safetensors` | `models/vae/` | 335 MB |
+
 2. Set in `.env`:
 
 ```text
-INSTANTIMPACT_COMFY_CKPT_NAME=your-file.safetensors
+INSTANTIMPACT_COMFY_LOADER=split
+INSTANTIMPACT_COMFY_UNET_NAME=flux1-dev.safetensors
+INSTANTIMPACT_COMFY_CLIP_NAME1=clip_l.safetensors
+INSTANTIMPACT_COMFY_CLIP_NAME2=t5xxl_fp16.safetensors
+INSTANTIMPACT_COMFY_VAE_NAME=ae.safetensors
 INSTANTIMPACT_TRAIN_BASE_MODEL=matched-hf-id-or-local-path
 ```
 
 3. Record license + SHA-256 in `docs/model_cards.md`.
-4. Restart the GPU worker so it picks up the env.
+4. Restart ComfyUI so it rescans the model directories, then restart the GPU worker so it picks up the env.
 5. Generate a small portrait batch **before** raising CFG.
+
+Rollback is one key: `INSTANTIMPACT_COMFY_LOADER=checkpoint` returns to the fp8 templates.
+
+Budget about **34 GB** of VRAM (23.8 UNET + 9.8 T5). On a 48 GB L40S that fits only with the card otherwise idle — stop other GPU tenants first, or set `INSTANTIMPACT_COMFY_CLIP_NAME2=t5xxl_fp8_e4m3fn.safetensors` to save ~5 GB at a small prompt-fidelity cost.
 
 **Keep sampler CFG at 1.0** until the new card is de-distilled. Distilled Flux still ignores negatives at CFG 1. If the card says it wants CFG, raise it in Studio to ~3–4 after you confirm stills still look like Flux (not fried).
 

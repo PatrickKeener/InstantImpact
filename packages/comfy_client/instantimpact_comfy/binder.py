@@ -127,6 +127,23 @@ FLUX_STILL_LORA_REQUIRED_VARS = FLUX_STILL_REQUIRED_VARS | {
     "LORA_CLIP_STRENGTH",
 }
 
+# Split-weight path (flux_still_character_split_v1 / ..._lora_split_v1). BF16
+# Flux.1-dev only ships as a bare diffusion model, so the text encoders and VAE
+# load separately instead of coming out of a single checkpoint file.
+_SPLIT_LOADER_VARS = {
+    "UNET_NAME",
+    "UNET_WEIGHT_DTYPE",
+    "CLIP_NAME1",
+    "CLIP_NAME2",
+    "VAE_NAME",
+}
+FLUX_STILL_SPLIT_REQUIRED_VARS = (FLUX_STILL_REQUIRED_VARS - {"CKPT_NAME"}) | _SPLIT_LOADER_VARS
+FLUX_STILL_SPLIT_LORA_REQUIRED_VARS = FLUX_STILL_SPLIT_REQUIRED_VARS | {
+    "LORA_NAME",
+    "LORA_STRENGTH",
+    "LORA_CLIP_STRENGTH",
+}
+
 # Optional anatomy/realism LoRA chained after the character LoRA. Bypassed via
 # bypass_node when no weight file is configured.
 DETAIL_LORA_NODE_ID = "12"

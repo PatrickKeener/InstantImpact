@@ -25,3 +25,16 @@ Defaults: CFG **1.0**, steps **28**. No LoRA.
 ## `flux_still_character_lora_v1.json`
 
 Same as above plus **LoraLoader** (`LORA_NAME`, `LORA_STRENGTH`). Selected automatically when the character version has `pipeline_params.flux.comfy_lora_name` after **Register LoRA**.
+
+## `flux_still_character_split_v1.json` / `flux_still_character_lora_split_v1.json`
+
+**Flux BF16** equivalents. BF16 Flux.1-dev is published as a bare diffusion model — no text encoders, no VAE — so `CheckpointLoaderSimple` returns a null clip and the graph only fails once Comfy executes `CLIPTextEncode`. These templates load each component separately instead.
+
+| Placeholder | Role | Comfy directory |
+|-------------|------|-----------------|
+| `UNET_NAME` | Diffusion model | `models/diffusion_models/` |
+| `UNET_WEIGHT_DTYPE` | `default` keeps bf16; `fp8_e4m3fn` trades quality for VRAM | — |
+| `CLIP_NAME1` / `CLIP_NAME2` | CLIP-L and T5-XXL | `models/clip/` |
+| `VAE_NAME` | Flux autoencoder | `models/vae/` |
+
+Every other node id matches the fp8 templates, so the detail-LoRA and hi-res bypasses behave identically. Selected by `INSTANTIMPACT_COMFY_LOADER=split`.

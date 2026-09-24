@@ -259,6 +259,8 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         DETAIL_LORA_VARS,
         FLUX_STILL_LORA_REQUIRED_VARS,
         FLUX_STILL_REQUIRED_VARS,
+        FLUX_STILL_SPLIT_LORA_REQUIRED_VARS,
+        FLUX_STILL_SPLIT_REQUIRED_VARS,
         HIRES_BYPASS_ORDER,
         HIRES_VARS,
         bind_workflow,
@@ -332,6 +334,7 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         return {"ok": False}
 
     ckpt_name = os.environ.get("INSTANTIMPACT_COMFY_CKPT_NAME", "flux1-dev-fp8.safetensors")
+    split_weights = _use_split_weights()
     workflows_dir = Path(
         os.environ.get(
             "INSTANTIMPACT_WORKFLOWS_DIR",
@@ -344,8 +347,20 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     refs = _refs_dir(snapshot, data_dir)
 
     use_lora = bool(lora_name)
-    wf_name = "flux_still_character_lora_v1.json" if use_lora else "flux_still_character_v1.json"
-    required = FLUX_STILL_LORA_REQUIRED_VARS if use_lora else FLUX_STILL_REQUIRED_VARS
+    if split_weights:
+        wf_name = (
+            "flux_still_character_lora_split_v1.json"
+            if use_lora
+            else "flux_still_character_split_v1.json"
+        )
+        required = (
+            FLUX_STILL_SPLIT_LORA_REQUIRED_VARS if use_lora else FLUX_STILL_SPLIT_REQUIRED_VARS
+        )
+    else:
+        wf_name = (
+            "flux_still_character_lora_v1.json" if use_lora else "flux_still_character_v1.json"
+        )
+        required = FLUX_STILL_LORA_REQUIRED_VARS if use_lora else FLUX_STILL_REQUIRED_VARS
     wf_path = workflows_dir / wf_name
     if not wf_path.is_file():
         await _publish(
@@ -452,7 +467,6 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
 
         prefix = f"ii_{job_id[:8]}_{item_index:03d}"
         variables = {
-            "CKPT_NAME": ckpt_name,
             "CLIP_L_PROMPT": clip_l,
             "POSITIVE_PROMPT": positive,
             "NEGATIVE_PROMPT": negative or "",
@@ -466,6 +480,10 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             "SCHEDULER": scheduler,
             "FILENAME_PREFIX": prefix,
         }
+        if split_weights:
+            variables.update(_split_weight_vars())
+        else:
+            variables["CKPT_NAME"] = ckpt_name
         if use_lora:
             variables["LORA_NAME"] = lora_name
             variables["LORA_STRENGTH"] = lora_strength
@@ -639,6 +657,29 @@ def _optional_str(*candidates: Any) -> str | None:
         if text:
             return text
     return None
+
+
+def _use_split_weights() -> bool:
+    """Whether to load the diffusion model, text encoders, and VAE separately.
+
+    BF16 Flux.1-dev is published as a bare diffusion model with no CLIP or VAE
+    inside, so CheckpointLoaderSimple hands CLIPTextEncode a null clip and the
+    prompt only fails once Comfy starts executing it.
+    """
+    raw = (os.environ.get("INSTANTIMPACT_COMFY_LOADER") or "").strip().lower()
+    return raw in {"split", "unet", "diffusion_model"}
+
+
+def _split_weight_vars() -> dict[str, str]:
+    return {
+        "UNET_NAME": os.environ.get("INSTANTIMPACT_COMFY_UNET_NAME")
+        or "flux1-dev.safetensors",
+        "UNET_WEIGHT_DTYPE": os.environ.get("INSTANTIMPACT_COMFY_UNET_DTYPE") or "default",
+        "CLIP_NAME1": os.environ.get("INSTANTIMPACT_COMFY_CLIP_NAME1") or "clip_l.safetensors",
+        "CLIP_NAME2": os.environ.get("INSTANTIMPACT_COMFY_CLIP_NAME2")
+        or "t5xxl_fp16.safetensors",
+        "VAE_NAME": os.environ.get("INSTANTIMPACT_COMFY_VAE_NAME") or "ae.safetensors",
+    }
 
 
 def _sampler_cfg(flux_params: dict) -> float:
