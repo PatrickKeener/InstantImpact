@@ -64,6 +64,44 @@ class ComfyClient:
             r.raise_for_status()
             return r.json()
 
+    @staticmethod
+    def error_from_history(entry: dict[str, Any]) -> str | None:
+        """Extract Comfy's execution error from a history entry.
+
+        Comfy accepts a prompt over HTTP and only reports runtime failures here,
+        in status.messages, so a failed prompt is otherwise indistinguishable
+        from one that simply produced no images.
+        """
+        status = entry.get("status") or {}
+        details: list[str] = []
+        for message in status.get("messages") or []:
+            if not (isinstance(message, (list, tuple)) and len(message) == 2):
+                continue
+            event, data = message
+            if event not in {"execution_error", "execution_interrupted"}:
+                continue
+            if not isinstance(data, dict):
+                details.append(f"{event}: {data}")
+                continue
+            node = data.get("node_type") or data.get("node_id")
+            reason = (
+                data.get("exception_message") or data.get("exception_type") or str(event)
+            )
+            details.append(f"{node}: {reason}" if node else str(reason))
+        if details:
+            return "; ".join(details)
+        if status.get("status_str") == "error":
+            return "Comfy reported status_str=error without a message"
+        return None
+
+    @staticmethod
+    def _is_complete(entry: dict[str, Any]) -> bool:
+        status = entry.get("status")
+        if isinstance(status, dict) and "completed" in status:
+            return bool(status["completed"])
+        # Older Comfy builds only write history once a prompt finishes.
+        return True
+
     async def wait_for_prompt(
         self,
         prompt_id: str,
@@ -71,15 +109,29 @@ class ComfyClient:
         poll_interval: float = 0.5,
         timeout: float | None = None,
     ) -> dict[str, Any]:
-        """Poll history until the prompt appears (completed). Returns history entry."""
+        """Poll history until the prompt finishes. Returns the history entry.
+
+        Comfy publishes a history entry as soon as a prompt starts, so presence
+        alone does not mean it is done; returning early yields an entry with no
+        outputs and hides whatever actually went wrong.
+        """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + (timeout or self.timeout)
+        entry: dict[str, Any] | None = None
         while True:
             history = await self.get_history(prompt_id)
-            if prompt_id in history:
-                return history[prompt_id]
+            entry = history.get(prompt_id)
+            if entry is not None:
+                error = self.error_from_history(entry)
+                if error:
+                    raise ComfyClientError(f"Comfy prompt {prompt_id} failed — {error}")
+                if self._is_complete(entry):
+                    return entry
             if loop.time() >= deadline:
-                raise ComfyClientError(f"Timed out waiting for Comfy prompt {prompt_id}")
+                state = (entry or {}).get("status") or "not queued"
+                raise ComfyClientError(
+                    f"Timed out waiting for Comfy prompt {prompt_id} (status: {state})"
+                )
             await asyncio.sleep(poll_interval)
 
     async def get_image(

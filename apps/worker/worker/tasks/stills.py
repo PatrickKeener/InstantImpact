@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import io
 import json
+import logging
 import os
 import uuid
 from pathlib import Path
@@ -14,6 +15,8 @@ from typing import Any
 
 from worker.gpu_lock import GpuLock, is_cancel_requested
 from worker.paths import resolve_request_json
+
+log = logging.getLogger("instantimpact.worker.stills")
 
 # Aspect → (width, height) for stills
 _ASPECT_SIZES: dict[str, tuple[int, int]] = {
@@ -563,6 +566,7 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             )
         except Exception as e:
             failures += 1
+            log.exception("still failed job=%s item=%s: %s", job_id, item_index, e)
             await _publish(
                 redis,
                 {
