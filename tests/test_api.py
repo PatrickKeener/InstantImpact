@@ -76,6 +76,59 @@ def test_media_rejects_traversal(client: TestClient):
     assert r.status_code in (400, 404)
 
 
+def _lock_ready(client: TestClient, cid: str) -> str:
+    """Bootstrap + lock without a LoRA so tests can exercise the ready path."""
+    assert client.post(f"/api/characters/{cid}/bootstrap").status_code == 200
+    version_id = client.get(f"/api/characters/{cid}").json()["current_version"]["id"]
+    r = client.post(
+        f"/api/characters/{cid}/lock",
+        json={
+            "version_id": version_id,
+            "checklist_attestation": "I confirm adult synthetic lock for tests.",
+            "confirm_adult": True,
+            "confirm_synthetic": True,
+            "confirm_not_real_person": True,
+            "allow_without_lora": True,
+        },
+    )
+    assert r.status_code == 200, r.text
+    return version_id
+
+
+def test_quality_knobs_do_not_fork_a_locked_version(client: TestClient):
+    cid = _create_attested(client, "Locked Knobs")["id"]
+    locked_version_id = _lock_ready(client, cid)
+
+    r = client.patch(
+        f"/api/characters/{cid}",
+        json={"pipeline_params": {"flux": {"cfg": 3.5, "detail_lora_name": "skin.safetensors"}}},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "ready"
+    assert body["retrain_version_id"] is None
+
+    version = body["current_version"]
+    assert version["id"] == locked_version_id
+    assert version["pipeline_params"]["flux"]["cfg"] == 3.5
+    assert version["pipeline_params"]["flux"]["detail_lora_name"] == "skin.safetensors"
+    # Untouched knobs survive the merge
+    assert version["pipeline_params"]["flux"]["lora_strength"] == 0.85
+
+
+def test_profile_edit_still_forks_a_locked_version(client: TestClient):
+    cid = _create_attested(client, "Locked Profile")["id"]
+    locked_version_id = _lock_ready(client, cid)
+
+    r = client.patch(f"/api/characters/{cid}", json={"appearance": {"hair_color": "black"}})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Identity edits still open a retrain track; the locked version keeps serving generation.
+    assert body["retrain_version_id"] is not None
+    assert body["retrain_version_id"] != locked_version_id
+    assert body["locked_version_id"] == locked_version_id
+
+
 def test_character_ref_pack_path_is_portable(client: TestClient):
     character = _create_attested(client, "Portable Refs")
     ref_path = character["current_version"]["ref_pack_path"]

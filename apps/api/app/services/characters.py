@@ -249,7 +249,13 @@ async def update_character(db: AsyncSession, character_id: str, payload: Charact
     if version is None:
         raise CharacterServiceError("No version available")
 
-    if c.status == CharacterStatus.READY and version.id == c.locked_version_id:
+    data = payload.model_dump(exclude_unset=True)
+    # Sampler knobs are not identity. Forking a locked character for them would
+    # strand the trained LoRA on the old version and leave generation — which
+    # reads the locked version — using the pre-edit values.
+    profile_edit = any(k != "pipeline_params" for k in data)
+
+    if c.status == CharacterStatus.READY and version.id == c.locked_version_id and profile_edit:
         # Edits to a locked character create a new drafting version (retrain track) for profile changes only
         # Profile-only edits on ready: update a new drafting version without demoting ready
         next_int = max(v.version_int for v in c.versions) + 1
@@ -282,7 +288,6 @@ async def update_character(db: AsyncSession, character_id: str, payload: Charact
         ):
             sub.mkdir(parents=True, exist_ok=True)
 
-    data = payload.model_dump(exclude_unset=True)
     if "display_name" in data and data["display_name"]:
         c.display_name = data["display_name"]
     for field in (
