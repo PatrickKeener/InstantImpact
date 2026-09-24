@@ -24,6 +24,36 @@ from instantimpact_prompts.render_flux import render_flux_prompts
 
 log = logging.getLogger("instantimpact.jobs")
 
+# Worker watches this key (see worker.gpu_lock.is_cancel_requested). No TTL used
+# to mean the flag lived forever and leftover keys made cancelled jobs confusing.
+_CANCEL_KEY = "instantimpact:cancel:{job_id}"
+_CANCEL_TTL_SECONDS = 24 * 3600
+
+
+async def _set_cancel_flag(job_id: str) -> None:
+    settings = get_settings()
+    try:
+        import redis.asyncio as redis
+
+        r = redis.from_url(settings.redis_url)
+        await r.set(_CANCEL_KEY.format(job_id=job_id), "1", ex=_CANCEL_TTL_SECONDS)
+        await r.publish("instantimpact:cancel", job_id)
+        await r.aclose()
+    except Exception:
+        log.warning("Could not set Redis cancel flag for %s", job_id, exc_info=True)
+
+
+async def _clear_cancel_flag(job_id: str) -> None:
+    settings = get_settings()
+    try:
+        import redis.asyncio as redis
+
+        r = redis.from_url(settings.redis_url)
+        await r.delete(_CANCEL_KEY.format(job_id=job_id))
+        await r.aclose()
+    except Exception:
+        log.debug("Could not clear Redis cancel flag for %s", job_id, exc_info=True)
+
 
 class JobServiceError(Exception):
     def __init__(self, message: str, status_code: int = 400) -> None:
@@ -252,6 +282,7 @@ async def _enqueue(
 
     await db.commit()
     job = await get_job(db, job.id)
+    await _clear_cancel_flag(job.id)
 
     # Prefer ARQ (worker writes files + Redis events). Mock without Redis uses a
     # FastAPI BackgroundTask so the HTTP response is not blocked.
@@ -519,16 +550,7 @@ async def cancel_job(db: AsyncSession, job_id: str) -> dict:
         for item in job.items:
             if item.status in (JobItemStatus.PENDING, JobItemStatus.RUNNING):
                 item.status = JobItemStatus.SKIPPED
-    settings = get_settings()
-    try:
-        import redis.asyncio as redis
-
-        r = redis.from_url(settings.redis_url)
-        await r.set(f"instantimpact:cancel:{job_id}", "1")
-        await r.publish("instantimpact:cancel", job_id)
-        await r.aclose()
-    except Exception:
-        pass
+    await _set_cancel_flag(job_id)
     await db.commit()
     return job_to_out(await get_job(db, job_id))
 
