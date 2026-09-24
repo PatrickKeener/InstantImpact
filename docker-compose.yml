@@ -70,12 +70,18 @@ services:
       # Per-prompt (one still) must stay well under the whole-job backstop.
       INSTANTIMPACT_COMFY_TIMEOUT: ${INSTANTIMPACT_COMFY_TIMEOUT:-600}
       INSTANTIMPACT_JOB_TIMEOUT: ${INSTANTIMPACT_JOB_TIMEOUT:-14400}
+      # Optional comma-separated allow-list. The worker only stops these exact
+      # container names and restores only ones that were running.
+      INSTANTIMPACT_GPU_PAUSE_CONTAINERS: ${INSTANTIMPACT_GPU_PAUSE_CONTAINERS:-}
       INSTANTIMPACT_DATA_DIR: /app/data
       INSTANTIMPACT_WORKFLOWS_DIR: /app/workflows
       PYTHONPATH: /app/apps/worker:/app/apps/api:/app/packages/common:/app/packages/comfy_client:/app/packages/prompt_engine
     volumes:
       - ./data:/app/data
       - ./workflows:/app/workflows:ro
+      # Required only when GPU_PAUSE_CONTAINERS is set. Docker's socket grants
+      # host-level control; do not expose this worker to untrusted code/users.
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - api
 

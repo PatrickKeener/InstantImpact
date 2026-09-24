@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from worker.gpu_lock import GpuLock, is_cancel_requested
+from worker.gpu_services import GpuServiceError, GpuServiceLease
 from worker.paths import resolve_request_json
 
 log = logging.getLogger("instantimpact.worker.stills")
@@ -73,8 +74,27 @@ async def process_still_job(
         )
         return {"ok": False}
 
+    services = GpuServiceLease()
     try:
-        await _publish(redis, {"job_id": job_id, "event": "running", "message": "GPU acquired"})
+        paused = await services.acquire()
+    except GpuServiceError as exc:
+        await _publish(
+            redis,
+            {
+                "job_id": job_id,
+                "event": "failed",
+                "error_code": "gpu_service_pause_failed",
+                "message": str(exc),
+            },
+        )
+        await lock.release()
+        return {"ok": False}
+
+    try:
+        message = "GPU acquired"
+        if paused:
+            message += f"; paused GPU services: {', '.join(paused)}"
+        await _publish(redis, {"job_id": job_id, "event": "running", "message": message})
         return await _run_comfy(redis, snapshot, request_path=path)
     except asyncio.CancelledError:
         # arq's job_timeout (or a worker shutdown) killed us mid-batch. Without
@@ -98,7 +118,23 @@ async def process_still_job(
             )
         raise
     finally:
+        # Flux stays resident in Comfy after generation. Unload it before
+        # restoring the other services or they can immediately OOM.
+        if services.enabled:
+            await _unload_comfy()
+        restored = await services.restore()
+        if restored:
+            log.info("restored GPU services: %s", ", ".join(restored))
         await lock.release()
+
+
+async def _unload_comfy() -> None:
+    """Best-effort model unload before competing GPU services restart."""
+    from instantimpact_comfy.client import ComfyClient
+
+    comfy_url = os.environ.get("INSTANTIMPACT_COMFY_URL", "http://127.0.0.1:8188")
+    log.info("unloading Comfy models before restoring GPU services")
+    await ComfyClient(comfy_url, timeout=30.0).free_memory(unload_models=True)
 
 
 def _refs_dir(snapshot: dict, data_dir: Path) -> Path | None:

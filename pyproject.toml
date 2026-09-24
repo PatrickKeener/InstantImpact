@@ -19,6 +19,7 @@ dependencies = [
   "python-slugify>=8.0.4",
   "orjson>=3.10.0",
   "websockets>=13.0",
+  "docker>=7.1.0",
 ]
 
 [project.optional-dependencies]
