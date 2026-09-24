@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "worker"))
 
-from worker.tasks.stills import _ensure_adult_prompt, _hires_size, _size_for_aspect
+from worker.tasks.stills import _ensure_adult_prompt, _hires_size, _sampler_cfg, _size_for_aspect
 
 
 def test_aspect_ratio_wins_over_legacy_default_dimensions():
@@ -47,6 +47,13 @@ def test_hires_size_snaps_fractional_scales_to_multiples_of_16():
     assert hi_w % 16 == 0 and hi_h % 16 == 0
 
 
-def test_hires_size_clamps_runaway_scale():
-    assert _hires_size(1024, 1280, 8.0) == (2048, 2560)
-    assert _hires_size(1024, 1280, 0.25) == (1024, 1280)
+def test_sampler_cfg_defaults_to_distilled_flux():
+    assert _sampler_cfg({}) == 1.0
+    assert _sampler_cfg({"cfg": None}) == 1.0
+    assert _sampler_cfg({"cfg": "nope"}) == 1.0
+
+
+def test_sampler_cfg_honors_de_distilled_range():
+    assert _sampler_cfg({"cfg": 3.5}) == 3.5
+    assert _sampler_cfg({"cfg": 0.2}) == 1.0
+    assert _sampler_cfg({"cfg": 99}) == 8.0

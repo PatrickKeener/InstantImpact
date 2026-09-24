@@ -9,6 +9,7 @@
 Full architecture, consistency strategy, and PR plan:
 
 - [`docs/design-instantimpact.md`](docs/design-instantimpact.md)
+- [`docs/quality-phases.md`](docs/quality-phases.md) — still quality rollout (checkpoint, CFG, LoRAs)
 
 ## Frozen MVP
 

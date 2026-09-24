@@ -34,6 +34,51 @@ type BriefLine = {
 
 const FILTERS = ["all", "pending", "approved", "rejected"] as const;
 
+type FluxKnobs = {
+  cfg: number;
+  guidance: number;
+  steps: number;
+  hires_fix: boolean;
+  hires_denoise: number;
+  detail_lora_name: string;
+  detail_lora_strength: number;
+};
+
+const DEFAULT_FLUX_KNOBS: FluxKnobs = {
+  cfg: 1,
+  guidance: 2.5,
+  steps: 28,
+  hires_fix: true,
+  hires_denoise: 0.4,
+  detail_lora_name: "",
+  detail_lora_strength: 0.6,
+};
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function num(value: unknown, fallback: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function readFluxKnobs(character: Character | null): FluxKnobs {
+  const params = asRecord(character?.current_version?.pipeline_params);
+  const flux = asRecord(params.flux && Object.keys(asRecord(params.flux)).length ? params.flux : params);
+  return {
+    cfg: num(flux.cfg, DEFAULT_FLUX_KNOBS.cfg),
+    guidance: num(flux.guidance, DEFAULT_FLUX_KNOBS.guidance),
+    steps: num(flux.steps, DEFAULT_FLUX_KNOBS.steps),
+    hires_fix: flux.hires_fix === undefined ? true : Boolean(flux.hires_fix),
+    hires_denoise: num(flux.hires_denoise, DEFAULT_FLUX_KNOBS.hires_denoise),
+    detail_lora_name: flux.detail_lora_name != null ? String(flux.detail_lora_name) : "",
+    detail_lora_strength: num(flux.detail_lora_strength, DEFAULT_FLUX_KNOBS.detail_lora_strength),
+  };
+}
+
 export default function CharacterStudio() {
   const { id } = useParams();
   const [character, setCharacter] = useState<Character | null>(null);
@@ -71,6 +116,8 @@ export default function CharacterStudio() {
   const [adCopy, setAdCopy] = useState<AdCopyResult | null>(null);
   const [adCaptionEdit, setAdCaptionEdit] = useState("");
   const [captionAssetId, setCaptionAssetId] = useState("");
+  const [fluxKnobs, setFluxKnobs] = useState<FluxKnobs>(DEFAULT_FLUX_KNOBS);
+  const [fluxDirty, setFluxDirty] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!id) return;
@@ -93,6 +140,10 @@ export default function CharacterStudio() {
   useEffect(() => {
     refresh().catch((e) => setError(e.message));
   }, [refresh]);
+
+  useEffect(() => {
+    if (!fluxDirty) setFluxKnobs(readFluxKnobs(character));
+  }, [character, fluxDirty]);
 
   const activeJobs = jobs.filter((j) => j.status === "queued" || j.status === "running");
   useEffect(() => {
@@ -170,6 +221,46 @@ export default function CharacterStudio() {
         })),
       });
       await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function patchFlux(partial: Partial<FluxKnobs>) {
+    setFluxDirty(true);
+    setFluxKnobs((prev) => ({ ...prev, ...partial }));
+  }
+
+  async function saveStillQuality() {
+    if (!id || !character?.current_version) return;
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const params = asRecord(character.current_version.pipeline_params);
+      const currentFlux = asRecord(
+        params.flux && Object.keys(asRecord(params.flux)).length ? params.flux : params
+      );
+      await api.updateCharacter(id, {
+        pipeline_params: {
+          ...params,
+          flux: {
+            ...currentFlux,
+            cfg: fluxKnobs.cfg,
+            guidance: fluxKnobs.guidance,
+            steps: fluxKnobs.steps,
+            hires_fix: fluxKnobs.hires_fix,
+            hires_denoise: fluxKnobs.hires_denoise,
+            detail_lora_name: fluxKnobs.detail_lora_name.trim() || null,
+            detail_lora_strength: fluxKnobs.detail_lora_strength,
+          },
+        },
+      });
+      setFluxDirty(false);
+      await refresh();
+      setInfo("Still quality settings saved on this character version.");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -662,6 +753,113 @@ export default function CharacterStudio() {
           </p>
         </section>
       </div>
+
+      <section className="card space-y-4 p-5">
+        <h2 className="font-display text-xl">Still quality</h2>
+        <p className="text-sm text-slate-400">
+          Phase 1 knobs for this character version. Keep CFG at 1.0 on stock Flux.1-dev.
+          After you switch to a de-distilled checkpoint, raise CFG to about 3–4 so the
+          negative prompt actually applies. Detail LoRA is a filename in Comfy{" "}
+          <code>models/loras</code>.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <label className="label">CFG (sampler)</label>
+            <input
+              type="number"
+              min={1}
+              max={8}
+              step={0.1}
+              className="input"
+              value={fluxKnobs.cfg}
+              onChange={(e) => patchFlux({ cfg: Number(e.target.value) })}
+            />
+          </div>
+          <div>
+            <label className="label">Guidance</label>
+            <input
+              type="number"
+              min={1}
+              max={5}
+              step={0.1}
+              className="input"
+              value={fluxKnobs.guidance}
+              onChange={(e) => patchFlux({ guidance: Number(e.target.value) })}
+            />
+          </div>
+          <div>
+            <label className="label">Steps</label>
+            <input
+              type="number"
+              min={20}
+              max={60}
+              step={1}
+              className="input"
+              value={fluxKnobs.steps}
+              onChange={(e) => patchFlux({ steps: Number(e.target.value) })}
+            />
+          </div>
+          <div>
+            <label className="label">Hi-res denoise</label>
+            <input
+              type="number"
+              min={0.15}
+              max={0.7}
+              step={0.05}
+              className="input"
+              value={fluxKnobs.hires_denoise}
+              onChange={(e) => patchFlux({ hires_denoise: Number(e.target.value) })}
+            />
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-end">
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={fluxKnobs.hires_fix}
+              onChange={(e) => patchFlux({ hires_fix: e.target.checked })}
+            />
+            Hi-res pass
+          </label>
+          <div>
+            <label className="label">Detail LoRA filename</label>
+            <input
+              className="input font-mono text-xs"
+              placeholder="optional — e.g. flux_skin_detail.safetensors"
+              value={fluxKnobs.detail_lora_name}
+              onChange={(e) => patchFlux({ detail_lora_name: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="label">Detail strength</label>
+            <input
+              type="number"
+              min={0}
+              max={1.2}
+              step={0.05}
+              className="input w-24"
+              value={fluxKnobs.detail_lora_strength}
+              onChange={(e) => patchFlux({ detail_lora_strength: Number(e.target.value) })}
+            />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={busy || !fluxDirty}
+            onClick={() => void saveStillQuality()}
+          >
+            Save quality settings
+          </button>
+          {fluxDirty && <span className="text-xs text-amber-200">Unsaved</span>}
+        </div>
+        <p className="text-xs text-slate-500">
+          Identity drift after the second pass: lower hi-res denoise to 0.25–0.35 before raising
+          character LoRA strength. Checkpoint swap is still an env setting (
+          <code>INSTANTIMPACT_COMFY_CKPT_NAME</code>), not this panel.
+        </p>
+      </section>
 
       <section className="card space-y-4 p-5">
         <h2 className="font-display text-xl">Identity LoRA</h2>

@@ -12,7 +12,7 @@ from app.db.models import Asset, Character, CharacterVersion
 from app.schemas.characters import CharacterCreate, CharacterUpdate, LockCharacterRequest
 from app.services.storage import get_layout
 from instantimpact_common.enums import CharacterStatus, VersionStatus
-from instantimpact_common.schemas import PipelineParams
+from instantimpact_common.schemas import PipelineParams, merge_pipeline_params
 from instantimpact_prompts.contract import build_prompt_contract
 from instantimpact_prompts.render_flux import render_flux_prompts
 
@@ -312,7 +312,12 @@ async def update_character(db: AsyncSession, character_id: str, payload: Charact
     if "trigger_word" in data and data["trigger_word"] is not None:
         version.trigger_word = data["trigger_word"]
     if "pipeline_params" in data and data["pipeline_params"] is not None:
-        version.pipeline_params_json = data["pipeline_params"]
+        incoming = data["pipeline_params"]
+        if hasattr(incoming, "model_dump"):
+            incoming = incoming.model_dump(exclude_unset=True)
+        version.pipeline_params_json = merge_pipeline_params(
+            version.pipeline_params_json, incoming
+        )
 
     contract = build_prompt_contract(
         appearance=version.appearance_json or {},

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from instantimpact_common.enums import AgeAppearanceBand, Pipeline
 
@@ -85,6 +85,8 @@ class SafetyConfirmations(BaseModel):
 
 
 class FluxPipelineParams(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     lora_strength: float = 0.85
     lora_clip_strength: float = 0.55
     # Optional anatomy/realism LoRA in ComfyUI/models/loras. Flux.1-dev's nude
@@ -107,7 +109,8 @@ class FluxPipelineParams(BaseModel):
     hires_scheduler: str = "simple"
     ip_adapter_strength: float = 0.6
     pulid_strength: float = 0.7
-    # Flux Dev: KSampler CFG stays at 1.0; native guidance controls adherence.
+    # Distilled Flux.1-dev must stay at cfg 1.0 (negatives are inert).
+    # De-distilled Flux-arch finetunes should use ~3–4 so NEGATIVE_PROMPT bites.
     steps: int = 28
     cfg: float = 1.0
     guidance: float = 2.5
@@ -118,7 +121,25 @@ class FluxPipelineParams(BaseModel):
 
 
 class PipelineParams(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     flux: FluxPipelineParams = Field(default_factory=FluxPipelineParams)
+
+
+def merge_pipeline_params(
+    current: dict[str, Any] | None, incoming: dict[str, Any]
+) -> dict[str, Any]:
+    """Deep-merge flux knobs so a CFG tweak cannot wipe comfy_lora_name."""
+    merged = dict(current or {})
+    flux = dict(merged.get("flux") or {})
+    raw_flux = incoming.get("flux")
+    if isinstance(raw_flux, dict):
+        flux.update(raw_flux)
+    merged["flux"] = flux
+    for key, value in incoming.items():
+        if key != "flux":
+            merged[key] = value
+    return merged
 
 
 class PromptContract(BaseModel):

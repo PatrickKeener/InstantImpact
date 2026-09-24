@@ -29,8 +29,10 @@ def render_flux_encoder_prompts(
 ) -> tuple[str, str, str]:
     """Return (clip_l, t5, negative) for Flux's dual text encoders.
 
-    CLIP-L is capped at ~77 tokens, so it only gets identity + the requested
-    shot (theme, outfit, pose, location, extra). T5 gets the full prompt.
+    CLIP-L is capped at ~77 tokens. It gets shot intent, then compact
+    appearance (hair/eyes/body), then location/product/extra so identity is
+    not pushed off the window by a long commercial clause. T5 gets the full
+    prompt including style, notes, and the quality stack.
     """
     if isinstance(contract, dict):
         contract = PromptContract.model_validate(contract)
@@ -41,39 +43,37 @@ def render_flux_encoder_prompts(
     exposure = outfit or ", ".join(wardrobe_tokens)
     revealing = _contains_any(exposure, _REVEALING_MARKERS)
 
-    shot_parts: list[str] = []
-    # Lead with photo intent — Flux weights early tokens heavily
-    shot_parts.append("photorealistic photograph")
-    shot_parts.extend(contract.subject_tokens)
-
-    # Shot-specific instructions must precede detailed identity attributes so
-    # both Flux text encoders receive the requested scene and wardrobe.
-    shot_parts.append(scene)
+    # Lead with photo intent — Flux weights early tokens heavily.
+    # Shot-specific instructions must precede detailed identity on T5 so both
+    # encoders receive the requested scene and wardrobe.
+    shot_head: list[str] = ["photorealistic photograph", *contract.subject_tokens, scene]
     if outfit:
         # Avoid "wearing nude" awkwardness; pass outfit as-is if it already describes state
         if outfit.lower().startswith(_OUTFIT_STATE_PREFIXES):
-            shot_parts.append(outfit)
+            shot_head.append(outfit)
         else:
-            shot_parts.append(f"wearing {outfit}")
+            shot_head.append(f"wearing {outfit}")
     else:
         # Character wardrobe is only a fallback; an explicit outfit replaces it
-        shot_parts.extend(wardrobe_tokens)
+        shot_head.extend(wardrobe_tokens)
+    if pose_hint:
+        shot_head.append(pose_hint)
     # Anatomy guidance sits next to the wardrobe clause, not in the tail quality
     # stack, because Flux's weak nude prior only responds to early tokens.
     anatomy = NUDE_ANATOMY_DETAIL if revealing else None
-    if pose_hint:
-        shot_parts.append(pose_hint)
+
+    shot_tail: list[str] = []
     if location_hint:
-        shot_parts.append(location_hint.strip())
+        shot_tail.append(location_hint.strip())
     product_clause = product_prompt_fragment(
         name=product_name,
         description=product_description,
         placement=product_placement,
     )
     if product_clause:
-        shot_parts.append(product_clause)
+        shot_tail.append(product_clause)
     if extra_prompt:
-        shot_parts.append(extra_prompt)
+        shot_tail.append(extra_prompt)
 
     identity_parts: list[str] = []
     identity_parts.extend(contract.appearance_tokens)
@@ -83,10 +83,21 @@ def render_flux_encoder_prompts(
         identity_parts.append(notes)
     identity_parts.extend(_filter_quality_for_shot(contract.quality_tokens, scene=scene))
 
-    clip_shot = [*shot_parts, NUDE_ANATOMY_TAGS] if anatomy else shot_parts
-    t5_shot = [*shot_parts, anatomy] if anatomy else shot_parts
-    clip_l = ", ".join(_dedupe_tokens(clip_shot))
-    t5 = ", ".join(_dedupe_tokens([*t5_shot, *identity_parts]))
+    clip_l = ", ".join(
+        _dedupe_tokens(
+            [
+                *shot_head,
+                *([NUDE_ANATOMY_TAGS] if anatomy else []),
+                *contract.appearance_tokens,
+                *shot_tail,
+            ]
+        )
+    )
+    t5 = ", ".join(
+        _dedupe_tokens(
+            [*shot_head, *([anatomy] if anatomy else []), *shot_tail, *identity_parts]
+        )
+    )
     negative = ", ".join(_dedupe_tokens(contract.negative_tokens))
     return clip_l, t5, negative
 

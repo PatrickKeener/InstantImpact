@@ -10,6 +10,8 @@
 
 **Comfy path:** place checkpoint in `ComfyUI/models/checkpoints/`. App setting: `INSTANTIMPACT_COMFY_CKPT_NAME=flux1-dev-fp8.safetensors`. Workflow: `workflows/flux_still_character_v1.json`.
 
+Phased still-quality work (CFG, CLIP-L, checkpoint swap, detail LoRA): [`docs/quality-phases.md`](quality-phases.md).
+
 ## Swapping the still base checkpoint
 
 Stock Flux.1-dev was trained on a filtered dataset, so its prior for bare

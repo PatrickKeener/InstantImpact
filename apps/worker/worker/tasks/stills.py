@@ -286,7 +286,10 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         if flux_params.get("lora_clip_strength") is not None
         else 0.55
     )
-    detail_lora_name = flux_params.get("detail_lora_name") or None
+    detail_lora_name = _optional_str(
+        flux_params.get("detail_lora_name"),
+        os.environ.get("INSTANTIMPACT_DETAIL_LORA_NAME"),
+    )
     detail_lora_strength = float(
         flux_params.get("detail_lora_strength")
         if flux_params.get("detail_lora_strength") is not None
@@ -392,9 +395,9 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         return {"ok": False}
 
     default_steps = int(flux_params.get("steps") or 28)
-    # Flux Dev is guidance-distilled: KSampler CFG stays 1.0.
-    # Prompt adherence is the CLIPTextEncodeFlux guidance input.
-    default_cfg = 1.0
+    # Distilled Flux.1-dev: keep cfg 1.0. De-distilled bases: raise pipeline cfg.
+    # Prompt adherence is still the CLIPTextEncodeFlux guidance input.
+    default_cfg = _sampler_cfg(flux_params)
     default_guidance = float(
         flux_params.get("guidance") if flux_params.get("guidance") is not None else 2.5
     )
@@ -622,6 +625,28 @@ def _size_for_aspect(aspect: str, flux_params: dict) -> tuple[int, int]:
     ):
         return int(flux_params["width"]), int(flux_params["height"])
     return _ASPECT_SIZES.get(aspect, (1024, 1280))
+
+
+def _optional_str(*candidates: Any) -> str | None:
+    for value in candidates:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _sampler_cfg(flux_params: dict) -> float:
+    """KSampler CFG. Distilled Flux.1-dev must stay at 1.0; de-distilled ~3–4."""
+    raw = flux_params.get("cfg")
+    if raw is None:
+        return 1.0
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 1.0
+    return max(1.0, min(value, 8.0))
 
 
 def _hires_size(width: int, height: int, scale: float) -> tuple[int, int]:

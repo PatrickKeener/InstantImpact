@@ -147,8 +147,33 @@ def test_clip_l_keeps_shot_and_drops_character_quality_stack():
     assert "see-through white dress" in clip_l
     assert "natural pores" not in clip_l.lower()
     assert "tasteful erotic photography" not in clip_l
+    assert "auburn" in clip_l
+    assert clip_l.index("auburn") < clip_l.index("sunlit meadow")
     assert "natural pores" in t5.lower() or "skin texture" in t5.lower()
     assert "sunlit meadow" in t5
+
+
+def test_clip_l_puts_identity_before_product_clause():
+    from instantimpact_prompts.render_flux import render_flux_encoder_prompts
+
+    contract = build_prompt_contract(
+        appearance=AppearanceProfile(hair_color="auburn", eye_color="green"),
+        boundaries=BoundariesProfile(),
+        trigger_word="sks_aria_v1",
+    )
+    clip_l, t5, _ = render_flux_encoder_prompts(
+        contract,
+        theme="glamour",
+        product_name="Aurora Serum",
+        product_description="frosted glass bottle",
+        product_placement="holding",
+    )
+    assert "auburn" in clip_l
+    assert "Aurora Serum" in clip_l
+    assert clip_l.index("auburn") < clip_l.index("Aurora Serum")
+    assert "Aurora Serum" in t5
+    assert "raw photo" in t5
+    assert "raw photo" not in clip_l
 
 
 def test_clothed_outfit_drops_nude_character_style():
@@ -211,3 +236,16 @@ def test_product_prompt_fragment_defaults():
     assert frag is not None
     assert "Vial X" in frag
     assert "advertisement" in frag.lower() or "hero" in frag.lower()
+
+
+def test_merge_pipeline_params_does_not_wipe_registered_lora():
+    from instantimpact_common.schemas import PipelineParams, merge_pipeline_params
+
+    current = {"flux": {"comfy_lora_name": "sienna.safetensors", "lora_strength": 0.9}}
+    incoming = PipelineParams.model_validate({"flux": {"cfg": 3.5}}).model_dump(
+        exclude_unset=True
+    )
+    merged = merge_pipeline_params(current, incoming)
+    assert merged["flux"]["comfy_lora_name"] == "sienna.safetensors"
+    assert merged["flux"]["lora_strength"] == 0.9
+    assert merged["flux"]["cfg"] == 3.5
