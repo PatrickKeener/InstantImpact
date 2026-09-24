@@ -67,7 +67,7 @@ def test_configured_container_names_are_trimmed_and_deduplicated(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_lease_restores_only_containers_that_were_running(monkeypatch):
+async def test_lease_stops_only_running_services(monkeypatch):
     containers = {
         "ollama": FakeContainer("ollama", "running"),
         "nemotron-ocr-nim": FakeContainer("nemotron-ocr-nim", "exited"),
@@ -78,13 +78,35 @@ async def test_lease_restores_only_containers_that_were_running(monkeypatch):
 
     assert await lease.acquire() == ["ollama", "vllm"]
     assert containers["ollama"].status == "exited"
-    assert containers["nemotron-ocr-nim"].stop_calls == 0
     assert containers["vllm"].status == "exited"
+    assert containers["nemotron-ocr-nim"].stop_calls == 0
 
-    assert await lease.restore() == ["ollama", "vllm"]
+
+@pytest.mark.asyncio
+async def test_restore_brings_up_every_configured_service(monkeypatch):
+    # nemotron was stopped by hand before the job; the configured list is the
+    # idle state, so it still comes back.
+    containers = {
+        "ollama": FakeContainer("ollama", "running"),
+        "nemotron-ocr-nim": FakeContainer("nemotron-ocr-nim", "exited"),
+    }
+    install_fake_docker(monkeypatch, containers)
+    lease = GpuServiceLease(names=list(containers))
+
+    assert await lease.acquire() == ["ollama"]
+    assert await lease.restore() == ["ollama", "nemotron-ocr-nim"]
     assert containers["ollama"].start_calls == 1
-    assert containers["nemotron-ocr-nim"].start_calls == 0
-    assert containers["vllm"].start_calls == 1
+    assert containers["nemotron-ocr-nim"].start_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_restore_leaves_an_already_running_service_alone(monkeypatch):
+    containers = {"ollama": FakeContainer("ollama", "running")}
+    install_fake_docker(monkeypatch, containers)
+    lease = GpuServiceLease(names=["ollama"])
+
+    assert await lease.restore() == []
+    assert containers["ollama"].start_calls == 0
 
 
 @pytest.mark.asyncio
@@ -95,6 +117,16 @@ async def test_missing_configured_container_is_ignored(monkeypatch):
 
     assert await lease.acquire() == ["ollama"]
     assert await lease.restore() == ["ollama"]
+
+
+@pytest.mark.asyncio
+async def test_disabled_lease_is_a_no_op(monkeypatch):
+    install_fake_docker(monkeypatch, {})
+    lease = GpuServiceLease(names=[])
+
+    assert lease.enabled is False
+    assert await lease.acquire() == []
+    assert await lease.restore() == []
 
 
 @pytest.mark.asyncio

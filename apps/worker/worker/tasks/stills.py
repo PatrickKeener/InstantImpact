@@ -118,10 +118,10 @@ async def process_still_job(
             )
         raise
     finally:
-        # Flux stays resident in Comfy after generation. Unload it before
-        # restoring the other services or they can immediately OOM.
-        if services.enabled:
-            await _unload_comfy()
+        # Flux stays resident in Comfy after generation, and bf16 holds ~34GB.
+        # Always hand the VRAM back, and do it before restoring the other
+        # services or they can immediately OOM.
+        await _unload_comfy()
         restored = await services.restore()
         if restored:
             log.info("restored GPU services: %s", ", ".join(restored))
@@ -129,12 +129,13 @@ async def process_still_job(
 
 
 async def _unload_comfy() -> None:
-    """Best-effort model unload before competing GPU services restart."""
-    from instantimpact_comfy.client import ComfyClient
+    """Best-effort model unload. Runs in a finally, so it must never raise."""
+    with contextlib.suppress(Exception):
+        from instantimpact_comfy.client import ComfyClient
 
-    comfy_url = os.environ.get("INSTANTIMPACT_COMFY_URL", "http://127.0.0.1:8188")
-    log.info("unloading Comfy models before restoring GPU services")
-    await ComfyClient(comfy_url, timeout=30.0).free_memory(unload_models=True)
+        comfy_url = os.environ.get("INSTANTIMPACT_COMFY_URL", "http://127.0.0.1:8188")
+        log.info("unloading Comfy models to release VRAM")
+        await ComfyClient(comfy_url, timeout=30.0).free_memory(unload_models=True)
 
 
 def _refs_dir(snapshot: dict, data_dir: Path) -> Path | None:

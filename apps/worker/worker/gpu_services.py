@@ -21,7 +21,12 @@ def configured_container_names() -> list[str]:
 
 @dataclass
 class GpuServiceLease:
-    """Stop configured containers and restore only those that were running."""
+    """Pause configured containers for a job, then bring them all back.
+
+    The configured list describes what should be running whenever the GPU is
+    idle, so restore starts every name in it — including one an operator had
+    stopped by hand before the job.
+    """
 
     names: list[str] = field(default_factory=configured_container_names)
     stopped: list[str] = field(default_factory=list)
@@ -76,19 +81,17 @@ class GpuServiceLease:
             client.close()
 
     async def restore(self) -> list[str]:
-        if not self.stopped:
+        if not self.enabled:
             return []
-        names = list(self.stopped)
         self.stopped.clear()
         try:
-            restored = await asyncio.to_thread(self._start, names)
+            return await asyncio.to_thread(self._start, list(self.names))
         except Exception:
             # Restoration is best effort, but it must be loud: the generation
             # result should not be hidden just because an unrelated service
             # failed to restart.
-            log.exception("failed to restore one or more GPU services: %s", names)
+            log.exception("failed to restore one or more GPU services: %s", self.names)
             return []
-        return restored
 
     @staticmethod
     def _start(names: list[str]) -> list[str]:
@@ -101,9 +104,10 @@ class GpuServiceLease:
                 try:
                     container = client.containers.get(name)
                     container.reload()
-                    if container.status != "running":
-                        log.info("restoring GPU service: %s", name)
-                        container.start()
+                    if container.status == "running":
+                        continue
+                    log.info("restoring GPU service: %s", name)
+                    container.start()
                     restored.append(name)
                 except Exception:
                     log.exception("could not restore GPU service: %s", name)

@@ -70,8 +70,8 @@ services:
       # Per-prompt (one still) must stay well under the whole-job backstop.
       INSTANTIMPACT_COMFY_TIMEOUT: ${INSTANTIMPACT_COMFY_TIMEOUT:-600}
       INSTANTIMPACT_JOB_TIMEOUT: ${INSTANTIMPACT_JOB_TIMEOUT:-14400}
-      # Optional comma-separated allow-list. The worker only stops these exact
-      # container names and restores only ones that were running.
+      # Optional comma-separated allow-list of exact container names, treated as
+      # the GPU's idle state: paused for a job, then started again afterwards.
       INSTANTIMPACT_GPU_PAUSE_CONTAINERS: ${INSTANTIMPACT_GPU_PAUSE_CONTAINERS:-}
       INSTANTIMPACT_DATA_DIR: /app/data
       INSTANTIMPACT_WORKFLOWS_DIR: /app/workflows
