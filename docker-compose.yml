@@ -12,6 +12,11 @@
 # If you do not have Redis on the host:
 #   docker compose --profile bundled-redis up -d --build
 #
+# Prefer scripts/ii start (native). Do NOT run this compose stack at the same
+# time: both bind 0.0.0.0:8001 and :5173. If you already have `ii` up:
+#   docker compose stop api web
+#   docker stop instantimpact-api instantimpact-web
+#
 # Prefer scripts/nemesis/up.sh on a working native install — faster and reuses .venv.
 
 services:
@@ -76,6 +81,8 @@ services:
       # the GPU's idle state: paused for a job, then started again afterwards.
       INSTANTIMPACT_GPU_PAUSE_CONTAINERS: ${INSTANTIMPACT_GPU_PAUSE_CONTAINERS:-}
       INSTANTIMPACT_GPU_PAUSE_HEALTH_TIMEOUT: ${INSTANTIMPACT_GPU_PAUSE_HEALTH_TIMEOUT:-120}
+      # Docker must not spawn/kill host Comfy (RO mount + pid files in the container).
+      INSTANTIMPACT_COMFY_LIFECYCLE: attach
       INSTANTIMPACT_DATA_DIR: /app/data
       INSTANTIMPACT_WORKFLOWS_DIR: /app/workflows
       PYTHONPATH: /app/apps/worker:/app/apps/api:/app/packages/common:/app/packages/comfy_client:/app/packages/prompt_engine

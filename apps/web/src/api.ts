@@ -337,6 +337,42 @@ export const api = {
     request<Job[]>(`/api/jobs${characterId ? `?character_id=${characterId}` : ""}`),
   getJob: (id: string) => request<Job>(`/api/jobs/${id}`),
   cancelJob: (id: string) => request<Job>(`/api/jobs/${id}/cancel`, { method: "POST" }),
+  importSeedStills: async (
+    characterId: string,
+    files: File[],
+    opts?: { confirmSynthetic?: boolean; autoApprove?: boolean; theme?: string }
+  ) => {
+    const form = new FormData();
+    for (const file of files) form.append("files", file);
+    form.append("confirm_synthetic", opts?.confirmSynthetic === false ? "false" : "true");
+    form.append("auto_approve", opts?.autoApprove ? "true" : "false");
+    if (opts?.theme) form.append("theme", opts.theme);
+    const headers: Record<string, string> = {};
+    const token = apiToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(`${BASE}/api/characters/${characterId}/assets/import`, {
+      method: "POST",
+      headers,
+      body: form,
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = await res.json();
+        detail = body.detail || JSON.stringify(body);
+      } catch {
+        /* ignore */
+      }
+      throw new Error(`${res.status} ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
+    }
+    return res.json() as Promise<{
+      character_id: string;
+      imported: number;
+      assets: { id: string; path: string; original_filename: string }[];
+      errors: string[];
+      auto_approved: boolean;
+    }>;
+  },
   listAssets: (characterId: string, decision?: string) =>
     request<Asset[]>(
       `/api/characters/${characterId}/assets${decision ? `?decision=${decision}` : ""}`

@@ -588,6 +588,159 @@ async def list_jobs(db: AsyncSession, character_id: str | None = None, limit: in
     return [job_to_out(j) for j in rows]
 
 
+_IMPORT_EXT = {".png", ".jpg", ".jpeg", ".webp"}
+_IMPORT_MAX_BYTES = 20 * 1024 * 1024
+_IMPORT_MAX_FILES = 40
+
+
+async def import_seed_stills(
+    db: AsyncSession,
+    character_id: str,
+    uploads: list[Any],
+    *,
+    confirm_synthetic: bool,
+    auto_approve: bool = False,
+    theme: str | None = None,
+) -> dict:
+    """Save operator-provided AI stills as character assets for review/LoRA."""
+    from instantimpact_common.safety_lists import SYNTHETIC_DISCLOSURE_DEFAULT
+
+    c = await char_svc.get_character(db, character_id)
+    if c.status == CharacterStatus.ARCHIVED:
+        raise JobServiceError("Archived characters cannot import stills")
+    if not c.synthetic_confirmed or not c.not_real_person_attested:
+        raise JobServiceError(
+            "Confirm synthetic + not-a-real-person on the character before importing stills"
+        )
+    if not confirm_synthetic:
+        raise JobServiceError(
+            "Check the confirmation: imported files must be AI-generated synthetic adults, "
+            "not photographs of real people"
+        )
+    version = _version_for_generation(c)
+    if not version:
+        raise JobServiceError("Character has no version")
+    files = [u for u in uploads if u is not None]
+    if not files:
+        raise JobServiceError("Choose one or more PNG/JPEG/WebP stills")
+    if len(files) > _IMPORT_MAX_FILES:
+        raise JobServiceError(f"Import at most {_IMPORT_MAX_FILES} stills at a time")
+
+    try:
+        from PIL import Image
+    except ImportError as e:
+        raise JobServiceError("Pillow is required for still imports") from e
+
+    layout = get_layout()
+    out_dir = layout.outputs_dir / character_id / "imported"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    refs_dir = layout.refs_dir(character_id, version.version_int)
+    refs_dir.mkdir(parents=True, exist_ok=True)
+    if not version.ref_pack_path:
+        version.ref_pack_path = relative_to_data(refs_dir)
+
+    imported: list[dict] = []
+    errors: list[str] = []
+    existing = len(list(out_dir.glob("import_*.png")))
+    face_primary = refs_dir / "face_primary.png"
+
+    for index, upload in enumerate(files):
+        filename = getattr(upload, "filename", None) or f"import_{index}.png"
+        ext = Path(str(filename)).suffix.lower()
+        if ext == ".jpeg":
+            ext = ".jpg"
+        if ext not in _IMPORT_EXT:
+            errors.append(f"{filename}: unsupported type")
+            continue
+        reader = getattr(upload, "read", None)
+        if reader is None:
+            errors.append(f"{filename}: invalid upload")
+            continue
+        data = await reader()
+        if not data:
+            errors.append(f"{filename}: empty file")
+            continue
+        if len(data) > _IMPORT_MAX_BYTES:
+            errors.append(f"{filename}: larger than 20 MB")
+            continue
+        try:
+            import io
+
+            im = Image.open(io.BytesIO(data)).convert("RGB")
+        except Exception as exc:
+            errors.append(f"{filename}: could not decode ({exc})")
+            continue
+
+        n = existing + len(imported)
+        asset_id = str(uuid.uuid4())
+        stem = f"import_{n:03d}_{asset_id[:8]}"
+        path = out_dir / f"{stem}.png"
+        thumb = out_dir / f"{stem}_thumb.png"
+        im.save(path, "PNG")
+        tw, th = 192, max(1, int(192 * im.height / max(im.width, 1)))
+        im.resize((tw, th)).save(thumb, "PNG")
+
+        from instantimpact_common.similarity import best_ref_similarity
+
+        score = best_ref_similarity(path, refs_dir)
+        disclosure = {
+            "synthetic": True,
+            "ai_generated": True,
+            "age_appearance": "21+",
+            "disclosure": SYNTHETIC_DISCLOSURE_DEFAULT,
+            "pipeline": "import",
+            "imported": True,
+            "source": "external_ai",
+            "original_filename": filename,
+            "theme": (theme or "").strip() or None,
+        }
+        write_json(path.with_suffix(".disclosure.json"), disclosure)
+
+        from app.services.storage import sha256_file
+
+        asset = Asset(
+            id=asset_id,
+            character_id=c.id,
+            character_version_id=version.id,
+            job_id=None,
+            job_item_id=None,
+            kind="still",
+            path=relative_to_data(path),
+            thumb_path=relative_to_data(thumb),
+            sha256=sha256_file(path),
+            width=im.width,
+            height=im.height,
+            seed=None,
+            prompt_positive=None,
+            prompt_negative=None,
+            pipeline="import",
+            meta_json=disclosure,
+            decision="approved" if auto_approve else "pending",
+            consistency_score=score,
+        )
+        db.add(asset)
+        imported.append({"id": asset_id, "path": asset.path, "original_filename": filename})
+
+        if not face_primary.is_file():
+            im.save(face_primary, "PNG")
+        elif len(imported) <= 8:
+            ref_name = refs_dir / f"ref_import_{n:02d}.png"
+            if not ref_name.is_file():
+                im.save(ref_name, "PNG")
+
+    if not imported:
+        raise JobServiceError("; ".join(errors) or "No stills imported")
+
+    await db.commit()
+    return {
+        "character_id": c.id,
+        "imported": len(imported),
+        "assets": imported,
+        "errors": errors,
+        "auto_approved": auto_approve,
+    }
+
+
 async def list_assets(db: AsyncSession, character_id: str, decision: str | None = None) -> list[dict]:
     q = select(Asset).where(Asset.character_id == character_id).order_by(Asset.created_at.desc())
     if decision:

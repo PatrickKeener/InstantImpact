@@ -20,7 +20,7 @@ def comfy_url() -> str:
 
 def comfy_lifecycle() -> str:
     raw = (os.environ.get("INSTANTIMPACT_COMFY_LIFECYCLE") or "job").strip().lower()
-    return raw if raw in {"job", "keep"} else "job"
+    return raw if raw in {"job", "keep", "attach"} else "job"
 
 
 def start_timeout_seconds() -> float:

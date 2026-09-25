@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -18,6 +18,7 @@ from app.schemas.jobs import (
     JobOut,
     RegenerateAssetRequest,
     SeedGalleryRequest,
+    SeedImportResponse,
     StillBatchRequest,
 )
 from app.services import approved as approved_svc
@@ -77,6 +78,35 @@ async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
 async def cancel_job(job_id: str, db: AsyncSession = Depends(get_db)):
     try:
         return await svc.cancel_job(db, job_id)
+    except svc.JobServiceError as e:
+        raise _err(e) from e
+
+
+@router.post(
+    "/characters/{character_id}/assets/import",
+    response_model=SeedImportResponse,
+)
+async def import_seed_stills(
+    character_id: str,
+    files: list[UploadFile] = File(...),
+    confirm_synthetic: str = Form("false"),
+    auto_approve: str = Form("false"),
+    theme: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import AI stills from other tools into this character's review grid."""
+    def _flag(raw: str) -> bool:
+        return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+    try:
+        return await svc.import_seed_stills(
+            db,
+            character_id,
+            files,
+            confirm_synthetic=_flag(confirm_synthetic),
+            auto_approve=_flag(auto_approve),
+            theme=theme,
+        )
     except svc.JobServiceError as e:
         raise _err(e) from e
 

@@ -26,16 +26,29 @@ class GpuSession:
         if paused:
             self.notes.append("paused " + ", ".join(paused))
         try:
+            life = comfy_lifecycle()
             if self.kind == "stills":
-                started = await self.comfy.ensure_running()
-                if started:
-                    self.notes.append("started Comfy")
+                if life == "attach":
+                    if not await self.comfy.healthy():
+                        raise ComfyProcessError(
+                            "ComfyUI is not running at INSTANTIMPACT_COMFY_URL. "
+                            "Start it on the host (this worker will not spawn it)."
+                        )
+                    self.notes.append("Comfy attached")
                 else:
-                    self.notes.append("Comfy already up")
+                    started = await self.comfy.ensure_running()
+                    if started:
+                        self.notes.append("started Comfy")
+                    else:
+                        self.notes.append("Comfy already up")
             else:
                 if await self.comfy.healthy():
-                    await self.comfy.stop()
-                    self.notes.append("stopped Comfy for LoRA train")
+                    if life == "attach":
+                        await self.comfy.unload()
+                        self.notes.append("unloaded Comfy for LoRA train")
+                    else:
+                        await self.comfy.stop()
+                        self.notes.append("stopped Comfy for LoRA train")
         except ComfyProcessError as exc:
             await self.services.restore()
             raise GpuServiceError(str(exc)) from exc
@@ -48,11 +61,11 @@ class GpuSession:
         """Always free Comfy VRAM before bringing vLLM/Ollama back."""
         try:
             if self.kind == "stills":
-                if comfy_lifecycle() == "keep":
+                if comfy_lifecycle() in {"keep", "attach"}:
                     await self.comfy.unload()
                 else:
                     await self.comfy.stop()
-            elif await self.comfy.healthy():
+            elif await self.comfy.healthy() and comfy_lifecycle() != "attach":
                 await self.comfy.stop()
         except Exception:
             log.exception("failed to release Comfy")

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 
 @pytest.fixture
@@ -57,6 +59,12 @@ def _create_attested(client: TestClient, name: str = "Aria Test") -> dict:
     return r.json()
 
 
+def _png_bytes(color=(40, 120, 200), size=(96, 128)) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", size, color=color).save(buf, "PNG")
+    return buf.getvalue()
+
+
 def test_delete_character_removes_row(client: TestClient):
     created = _create_attested(client, "Delete Me")
     cid = created["id"]
@@ -68,6 +76,35 @@ def test_delete_character_removes_row(client: TestClient):
     listed = client.get("/api/characters")
     assert listed.status_code == 200
     assert all(c["id"] != cid for c in listed.json())
+
+
+def test_import_seed_stills_requires_synthetic_confirm(client: TestClient):
+    cid = _create_attested(client, "Import Gate")["id"]
+    files = {"files": ("face.png", _png_bytes(), "image/png")}
+    blocked = client.post(f"/api/characters/{cid}/assets/import", files=files, data={"confirm_synthetic": "false"})
+    assert blocked.status_code == 400
+
+
+def test_import_seed_stills_lands_in_outputs(client: TestClient):
+    cid = _create_attested(client, "Import Seeds")["id"]
+    files = [
+        ("files", ("a.png", _png_bytes((180, 90, 60)), "image/png")),
+        ("files", ("b.png", _png_bytes((60, 90, 180)), "image/png")),
+    ]
+    imported = client.post(
+        f"/api/characters/{cid}/assets/import",
+        files=files,
+        data={"confirm_synthetic": "true", "auto_approve": "true"},
+    )
+    assert imported.status_code == 200, imported.text
+    body = imported.json()
+    assert body["imported"] == 2
+    assets = client.get(f"/api/characters/{cid}/assets").json()
+    assert len(assets) == 2
+    assert all(a["decision"] == "approved" for a in assets)
+    assert all(a["meta"].get("imported") for a in assets)
+    media = client.get(f"/api/system/media/{assets[0]['path']}")
+    assert media.status_code == 200
 
 
 def test_health(client: TestClient):

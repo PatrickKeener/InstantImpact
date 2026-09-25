@@ -61,6 +61,21 @@ async def test_stills_session_pauses_tenants_then_starts_comfy(monkeypatch, fake
 
 
 @pytest.mark.asyncio
+async def test_attach_lifecycle_does_not_spawn_or_stop_comfy(monkeypatch, fake_comfy):
+    fake_comfy._healthy = True
+    install_fake_docker(monkeypatch, {})
+    monkeypatch.setenv("INSTANTIMPACT_COMFY_LIFECYCLE", "attach")
+    session = GpuSession(kind="stills")
+    session.services.names = []
+    msg = await session.acquire()
+    assert "attached" in msg.lower()
+    assert fake_comfy.ensure_calls == 0
+    await session.release()
+    assert fake_comfy.unload_calls == 1
+    assert fake_comfy.stop_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_keep_lifecycle_unloads_comfy_instead_of_stopping(monkeypatch, fake_comfy):
     install_fake_docker(monkeypatch, {})
     monkeypatch.setenv("INSTANTIMPACT_COMFY_LIFECYCLE", "keep")

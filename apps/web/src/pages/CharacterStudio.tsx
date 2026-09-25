@@ -116,6 +116,8 @@ export default function CharacterStudio() {
   const [loraStrength, setLoraStrength] = useState(0.85);
   const [trainSteps, setTrainSteps] = useState(1500);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("all");
+  const [importConfirm, setImportConfirm] = useState(false);
+  const [importApprove, setImportApprove] = useState(false);
   const [assetSort, setAssetSort] = useState<"newest" | "match">("newest");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [lightbox, setLightbox] = useState<number | null>(null);
@@ -189,6 +191,32 @@ export default function CharacterStudio() {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lightbox, visible, id]);
+
+  async function importSeeds(fileList: FileList | null) {
+    if (!id || !fileList?.length) return;
+    if (!importConfirm) {
+      setError(
+        "Confirm these are AI-generated synthetic adults (21+), not photographs of real people."
+      );
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const res = await api.importSeedStills(id, Array.from(fileList), {
+        confirmSynthetic: true,
+        autoApprove: importApprove,
+      });
+      const extra = res.errors.length ? ` Skipped: ${res.errors.join("; ")}` : "";
+      setInfo(`Imported ${res.imported} still${res.imported === 1 ? "" : "s"}.${extra}`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function runSeed() {
     if (!id) return;
@@ -605,6 +633,39 @@ export default function CharacterStudio() {
           <button className="btn-primary" disabled={busy} onClick={() => void runSeed()}>
             Generate seed set (6)
           </button>
+          <div className="space-y-2 rounded-xl border border-white/10 p-3">
+            <p className="text-xs text-slate-400">
+              Or upload stills from another AI tool. They land in Outputs for approve/reject, then
+              LoRA train uses approved ones.
+            </p>
+            <label className="flex gap-2 text-xs text-slate-300">
+              <input
+                type="checkbox"
+                checked={importConfirm}
+                onChange={(e) => setImportConfirm(e.target.checked)}
+              />
+              These are AI-generated synthetic adults (21+), not photos of real people
+            </label>
+            <label className="flex gap-2 text-xs text-slate-300">
+              <input
+                type="checkbox"
+                checked={importApprove}
+                onChange={(e) => setImportApprove(e.target.checked)}
+              />
+              Mark imported stills approved (ready for LoRA)
+            </label>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              multiple
+              disabled={busy}
+              className="block w-full text-xs text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-1.5 file:text-slate-100"
+              onChange={(e) => {
+                void importSeeds(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
         </section>
 
         <section className="card space-y-4 p-5">
@@ -1305,7 +1366,7 @@ cd /home/pkeener/InstantImpact/apps/worker
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
           {visible.map((a, idx) => (
             <div key={a.id} className="overflow-hidden rounded-xl border border-white/10 bg-black/30">
-              <button type="button" className="block w-full" onClick={() => setLightbox(idx)}>
+              <button type="button" className="relative block w-full" onClick={() => setLightbox(idx)}>
                 {a.thumb_path || a.path ? (
                   <img
                     src={api.mediaUrl(a.thumb_path || a.path)}
@@ -1315,6 +1376,11 @@ cd /home/pkeener/InstantImpact/apps/worker
                 ) : (
                   <div className="aspect-[3/4] bg-ink-800" />
                 )}
+                {a.meta?.imported ? (
+                  <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-200">
+                    imported
+                  </span>
+                ) : null}
               </button>
               <div className="space-y-2 p-2">
                 <label className="flex items-center gap-2 text-[10px] text-slate-500">

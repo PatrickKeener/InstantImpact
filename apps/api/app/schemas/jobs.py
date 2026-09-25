@@ -72,6 +72,20 @@ class JobOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SeedImportAssetOut(BaseModel):
+    id: str
+    path: str
+    original_filename: str
+
+
+class SeedImportResponse(BaseModel):
+    character_id: str
+    imported: int
+    assets: list[SeedImportAssetOut]
+    errors: list[str] = Field(default_factory=list)
+    auto_approved: bool = False
+
+
 class AssetOut(BaseModel):
     id: str
     character_id: str
