@@ -144,6 +144,22 @@ stop_vllm_if_requested() {
   fi
 }
 
+# Native `ii start` and docker compose both want :8001/:5173. The compose API
+# also 503s stills: it only sees a stub Comfy tree (loras mount), not the host
+# weights. Stop those app containers so the host API/worker/web own the ports.
+stop_compose_app_containers() {
+  if ! command -v docker >/dev/null 2>&1; then
+    return 0
+  fi
+  local name
+  for name in instantimpact-api instantimpact-worker instantimpact-web; do
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$name"; then
+      echo "  → docker stop ${name} (native ii stack owns API/web/worker)"
+      docker stop "$name" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 # Locate ComfyUI even when the script is run as root (HOME=/root).
 resolve_comfy_dir() {
   local candidates=()

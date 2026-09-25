@@ -186,3 +186,38 @@ async def test_requested_orchestration_fails_closed_without_docker(monkeypatch):
 
     with pytest.raises(GpuServiceError, match="mount /var/run/docker.sock"):
         await lease.acquire()
+
+
+@pytest.mark.asyncio
+async def test_cli_fallback_stops_and_restores_without_sdk(monkeypatch):
+    monkeypatch.setattr("worker.gpu_services._use_sdk", lambda: False)
+    state = {"ollama": "running", "vllm": "exited"}
+    calls: list[tuple[str, ...]] = []
+
+    def inspect(name: str):
+        status = state.get(name)
+        if status is None:
+            return None, None
+        return status, "healthy"
+
+    def cli(*args, timeout=90.0):
+        del timeout
+        calls.append(args)
+        if args[:1] == ("stop",):
+            state[args[-1]] = "exited"
+        if args[:1] == ("start",):
+            state[args[-1]] = "running"
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("worker.gpu_services._cli_inspect", inspect)
+    monkeypatch.setattr("worker.gpu_services._docker_cli", cli)
+    lease = GpuServiceLease(names=["ollama", "vllm"])
+
+    assert await lease.acquire() == ["ollama"]
+    assert state["ollama"] == "exited"
+    restored = await lease.restore()
+    assert "ollama" in restored
+    assert "vllm" in restored
+    assert state["ollama"] == "running"
+    assert ("stop", "-t", "30", "ollama") in calls
+    assert ("start", "ollama") in calls

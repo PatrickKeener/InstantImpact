@@ -57,6 +57,8 @@ if [[ "$STOP_VLLM" -eq 1 ]]; then
   stop_vllm_if_requested
 fi
 
+stop_compose_app_containers
+
 # Redis
 if redis_ok; then
   echo "  · redis OK"

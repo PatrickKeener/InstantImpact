@@ -71,7 +71,9 @@ def test_seed_gallery_fails_closed_when_split_weights_missing(tmp_path: Path, mo
     data = tmp_path / "data"
     (data / "db").mkdir(parents=True)
     comfy = tmp_path / "ComfyUI"
-    (comfy / "models").mkdir(parents=True)
+    (comfy / "models" / "diffusion_models").mkdir(parents=True)
+    (comfy / "models" / "clip").mkdir(parents=True)
+    (comfy / "models" / "vae").mkdir(parents=True)
     db = data / "db" / "ii.sqlite"
     monkeypatch.setenv("INSTANTIMPACT_DATA_DIR", str(data))
     monkeypatch.setenv("INSTANTIMPACT_DATABASE_URL", f"sqlite+aiosqlite:///{db.as_posix()}")

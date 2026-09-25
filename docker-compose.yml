@@ -47,7 +47,9 @@ services:
       - ./data:/app/data
       - ./workflows:/app/workflows:ro
       - ${INSTANTIMPACT_AI_TOOLKIT_DIR:-/home/pkeener/ai-toolkit}:${INSTANTIMPACT_AI_TOOLKIT_DIR:-/home/pkeener/ai-toolkit}:ro
-      - ${INSTANTIMPACT_COMFY_LORAS_DIR:-/home/pkeener/ComfyUI/models/loras}:${INSTANTIMPACT_COMFY_LORAS_DIR:-/home/pkeener/ComfyUI/models/loras}
+      # Full Comfy tree (not just loras). A loras-only bind creates a stub
+      # models/ dir and the API then 503s every still as "missing weights".
+      - ${INSTANTIMPACT_COMFY_DIR:-/home/pkeener/ComfyUI}:${INSTANTIMPACT_COMFY_DIR:-/home/pkeener/ComfyUI}:ro
 
   worker:
     build:

@@ -157,6 +157,24 @@ def _use_split(loader: str) -> bool:
     return loader in {"split", "unet", "diffusion_model"}
 
 
+def kind_dirs_present(comfy_root: Path | None, kind: str) -> bool:
+    """True when at least one canonical folder for this kind exists.
+
+    A Docker bind of only models/loras creates parent dirs without clip/vae/
+    diffusion_models. Those trees must not count as 'file missing'.
+    """
+    if comfy_root is None:
+        return False
+    for rel in KIND_DIRS.get(kind, (f"models/{kind}",)):
+        folder = comfy_root / rel
+        try:
+            if folder.is_dir():
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _file_entry(kind: str, name: str, path: Path | None) -> dict[str, Any]:
     return {
         "kind": kind,
@@ -207,8 +225,12 @@ def inspect_flux_still(
         for kind, name in required:
             path = find_model(runtime.comfy_root, kind, name)
             files.append(_file_entry(kind, name, path))
-            if path is None:
+            if path is not None:
+                continue
+            if kind_dirs_present(runtime.comfy_root, kind):
                 missing_weights.append(name)
+            else:
+                unverified = True
 
     optional: list[tuple[str, str]] = []
     if runtime.detail_lora_name:

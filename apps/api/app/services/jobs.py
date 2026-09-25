@@ -751,7 +751,9 @@ async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
         if job.status == JobStatus.QUEUED:
             job.status = JobStatus.RUNNING
             job.started_at = datetime.now(timezone.utc)
-            await db.commit()
+        if event.get("message"):
+            job.error_message = event.get("message")
+        await db.commit()
         return
 
     if name == "item_started":
@@ -794,6 +796,9 @@ async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
         return
 
     if name == "log":
+        if event.get("message") and job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
+            job.error_message = event.get("message")
+            await db.commit()
         return
 
     if name == "item_done":
@@ -868,6 +873,7 @@ async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
             job.error_message = event.get("message") or "All items failed"
         else:
             job.status = JobStatus.COMPLETED
+            job.error_message = None
         job.finished_at = datetime.now(timezone.utc)
         if job.brief_id:
             bq = await db.execute(select(ContentBrief).where(ContentBrief.id == job.brief_id))

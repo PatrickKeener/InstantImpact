@@ -195,8 +195,14 @@ export default function CharacterStudio() {
     setBusy(true);
     setError(null);
     try {
-      await api.seedGallery(id, { count: 6, themes: ["portrait", "glamour", "casual_bedroom"] });
+      const job = await api.seedGallery(id, {
+        count: 6,
+        themes: ["portrait", "glamour", "casual_bedroom"],
+      });
       await refresh();
+      if (job.status === "failed") {
+        setError(job.error_message || "Seed gallery failed");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -534,14 +540,22 @@ export default function CharacterStudio() {
         </div>
       )}
 
+      {jobs[0]?.status === "failed" && jobs[0].error_message && (
+        <div className="rounded-xl border border-red-500/30 bg-red-950/40 px-4 py-3 text-sm text-red-200">
+          Last job failed: {jobs[0].error_message}
+        </div>
+      )}
+
       {!!activeJobs.length && (
         <div className="rounded-xl border border-sky-500/30 bg-sky-950/30 px-4 py-3 text-sm text-sky-100">
-          Generating {activeJobs.length} job(s)
+          Generating {activeJobs.length} job(s) — first still can take several minutes
+          (Comfy start + Krea load). Watch Recent jobs below.
           {activeJobs.map((j) => {
             const done = j.items.filter((i) => i.status === "done").length;
             return (
-              <span key={j.id} className="ml-3 font-mono text-xs">
-                {j.type} {done}/{j.items.length}
+              <span key={j.id} className="mt-1 block font-mono text-xs">
+                {j.type} {j.status} {done}/{j.items.length}
+                {j.error_message ? ` — ${j.error_message}` : ""}
                 <button
                   type="button"
                   className="ml-2 underline"
@@ -1174,6 +1188,7 @@ cd /home/pkeener/InstantImpact/apps/worker
                 <th className="py-2 pr-4">Status</th>
                 <th className="py-2 pr-4">Items</th>
                 <th className="py-2 pr-4">Created</th>
+                <th className="py-2 pr-4">Detail</th>
                 <th className="py-2"> </th>
               </tr>
             </thead>
@@ -1186,6 +1201,9 @@ cd /home/pkeener/InstantImpact/apps/worker
                     {j.items.filter((i) => i.status === "done").length}/{j.items.length}
                   </td>
                   <td className="py-2 pr-4 text-slate-500">{new Date(j.created_at).toLocaleString()}</td>
+                  <td className="max-w-xs py-2 pr-4 text-xs text-amber-200/90">
+                    {j.error_message || ""}
+                  </td>
                   <td className="py-2">
                     {(j.status === "queued" || j.status === "running") && (
                       <button
@@ -1201,7 +1219,7 @@ cd /home/pkeener/InstantImpact/apps/worker
               ))}
               {!jobs.length && (
                 <tr>
-                  <td colSpan={5} className="py-4 text-slate-500">
+                  <td colSpan={6} className="py-4 text-slate-500">
                     No jobs yet
                   </td>
                 </tr>

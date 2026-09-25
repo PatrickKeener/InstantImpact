@@ -75,6 +75,14 @@ async def process_still_job(
         )
         return {"ok": False}
 
+    await _publish(
+        redis,
+        {
+            "job_id": job_id,
+            "event": "running",
+            "message": "Taking GPU — pausing vLLM/Ollama and starting Comfy",
+        },
+    )
     session = GpuSession(kind="stills")
     try:
         message = await session.acquire()

@@ -69,7 +69,30 @@ def test_split_ok_when_all_files_present(tmp_path: Path):
     assert fail_closed_message(report) is None
 
 
+def test_docker_stub_loras_only_is_unverified_not_missing(tmp_path: Path):
+    """Bind-mounting only models/loras creates parent dirs without the weights."""
+    _touch(tmp_path, "models/loras/.keep")
+    report = inspect_flux_still(
+        FluxRuntime(
+            mock=False,
+            comfy_enabled=True,
+            loader="split",
+            comfy_root=tmp_path,
+            ckpt_name="unused.safetensors",
+            unet_name="flux1-krea-dev.safetensors",
+            clip_name1="clip_l.safetensors",
+            clip_name2="t5xxl_fp16.safetensors",
+            vae_name="ae.safetensors",
+        ),
+        comfy_reachable=True,
+    )
+    assert report["missing_weights"] == []
+    assert report["unverified"] is True
+    assert fail_closed_message(report) is None
+
+
 def test_split_missing_unet_is_missing_weights(tmp_path: Path):
+    (tmp_path / "models" / "diffusion_models").mkdir(parents=True)
     _touch(tmp_path, "models/clip/clip_l.safetensors")
     _touch(tmp_path, "models/clip/t5xxl_fp16.safetensors")
     _touch(tmp_path, "models/vae/ae.safetensors")
