@@ -73,6 +73,7 @@ services:
       # Optional comma-separated allow-list of exact container names, treated as
       # the GPU's idle state: paused for a job, then started again afterwards.
       INSTANTIMPACT_GPU_PAUSE_CONTAINERS: ${INSTANTIMPACT_GPU_PAUSE_CONTAINERS:-}
+      INSTANTIMPACT_GPU_PAUSE_HEALTH_TIMEOUT: ${INSTANTIMPACT_GPU_PAUSE_HEALTH_TIMEOUT:-120}
       INSTANTIMPACT_DATA_DIR: /app/data
       INSTANTIMPACT_WORKFLOWS_DIR: /app/workflows
       PYTHONPATH: /app/apps/worker:/app/apps/api:/app/packages/common:/app/packages/comfy_client:/app/packages/prompt_engine

@@ -9,14 +9,27 @@ from worker.gpu_services import GpuServiceError, GpuServiceLease, configured_con
 
 
 class FakeContainer:
-    def __init__(self, name: str, status: str) -> None:
+    def __init__(self, name: str, status: str, health: list[str] | None = None) -> None:
         self.name = name
         self.status = status
         self.stop_calls = 0
         self.start_calls = 0
+        self.reload_calls = 0
+        # Successive health readings, last value repeating once exhausted.
+        self._health = list(health or [])
+        self.attrs: dict = {}
+        self._apply_health()
+
+    def _apply_health(self) -> None:
+        if not self._health:
+            self.attrs = {"State": {}}
+            return
+        value = self._health.pop(0) if len(self._health) > 1 else self._health[0]
+        self.attrs = {"State": {"Health": {"Status": value}}}
 
     def reload(self) -> None:
-        pass
+        self.reload_calls += 1
+        self._apply_health()
 
     def stop(self, timeout: int) -> None:
         assert timeout == 30
@@ -117,6 +130,42 @@ async def test_missing_configured_container_is_ignored(monkeypatch):
 
     assert await lease.acquire() == ["ollama"]
     assert await lease.restore() == ["ollama"]
+
+
+@pytest.mark.asyncio
+async def test_stop_waits_for_a_starting_service(monkeypatch):
+    # An NVIDIA NIM reports running while it is still building its workspace;
+    # stopping it there corrupts the workspace.
+    nim = FakeContainer("nemotron-ocr-nim", "running", health=["starting", "starting", "healthy"])
+    install_fake_docker(monkeypatch, {"nemotron-ocr-nim": nim})
+    monkeypatch.setattr("worker.gpu_services.time.sleep", lambda _s: None)
+    lease = GpuServiceLease(names=["nemotron-ocr-nim"], health_timeout=60.0)
+
+    assert await lease.acquire() == ["nemotron-ocr-nim"]
+    assert nim.reload_calls > 1
+    assert nim.stop_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_stop_gives_up_waiting_after_the_timeout(monkeypatch):
+    nim = FakeContainer("nemotron-ocr-nim", "running", health=["starting"])
+    install_fake_docker(monkeypatch, {"nemotron-ocr-nim": nim})
+    monkeypatch.setattr("worker.gpu_services.time.sleep", lambda _s: None)
+    lease = GpuServiceLease(names=["nemotron-ocr-nim"], health_timeout=0.05)
+
+    assert await lease.acquire() == ["nemotron-ocr-nim"]
+    assert nim.stop_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_healthy_service_is_stopped_without_waiting(monkeypatch):
+    ollama = FakeContainer("ollama", "running", health=["healthy"])
+    install_fake_docker(monkeypatch, {"ollama": ollama})
+    lease = GpuServiceLease(names=["ollama"], health_timeout=60.0)
+
+    assert await lease.acquire() == ["ollama"]
+    assert ollama.reload_calls == 1
+    assert ollama.stop_calls == 1
 
 
 @pytest.mark.asyncio

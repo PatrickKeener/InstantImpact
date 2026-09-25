@@ -87,6 +87,24 @@ class WorkerSettings:
     job_timeout = _job_timeout()
 
 
+def _weights_summary() -> str:
+    """Describe the weights actually in play.
+
+    Logging the checkpoint name unconditionally is misleading on the split
+    path, where that variable is ignored entirely.
+    """
+    from worker.tasks.stills import _split_weight_vars, _use_split_weights
+
+    if not _use_split_weights():
+        ckpt = os.environ.get("INSTANTIMPACT_COMFY_CKPT_NAME", "flux1-dev-fp8.safetensors")
+        return f"loader=checkpoint ckpt={ckpt}"
+    v = _split_weight_vars()
+    return (
+        f"loader=split unet={v['UNET_NAME']} dtype={v['UNET_WEIGHT_DTYPE']} "
+        f"clip={v['CLIP_NAME1']}+{v['CLIP_NAME2']} vae={v['VAE_NAME']}"
+    )
+
+
 def main() -> None:
     from arq.worker import run_worker
 
@@ -103,16 +121,18 @@ def main() -> None:
             host = rest or host
     WorkerSettings.redis_settings = RedisSettings(host=host, port=port)
     log.info(
-        "worker starting queue=%s redis=%s:%s comfy=%s ckpt=%s data=%s workflows=%s timeout=%ss",
+        "worker starting queue=%s redis=%s:%s comfy=%s data=%s workflows=%s timeout=%ss",
         WorkerSettings.queue_name,
         host,
         port,
         os.environ.get("INSTANTIMPACT_COMFY_URL", "http://127.0.0.1:8188"),
-        os.environ.get("INSTANTIMPACT_COMFY_CKPT_NAME", "flux1-dev-fp8.safetensors"),
         os.environ.get("INSTANTIMPACT_DATA_DIR", "(default)"),
         os.environ.get("INSTANTIMPACT_WORKFLOWS_DIR", "(default)"),
         WorkerSettings.job_timeout,
     )
+    log.info("weights: %s", _weights_summary())
+    pause = os.environ.get("INSTANTIMPACT_GPU_PAUSE_CONTAINERS") or "(none)"
+    log.info("gpu services paused per job: %s", pause)
     run_worker(WorkerSettings)  # type: ignore[arg-type]
 
 
