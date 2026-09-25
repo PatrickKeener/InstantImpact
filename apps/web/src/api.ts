@@ -240,6 +240,10 @@ export const api = {
     }),
   updateCharacter: (id: string, body: unknown) =>
     request<Character>(`/api/characters/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteCharacter: (id: string) =>
+    request<{ id: string; deleted: boolean; files_removed: number }>(`/api/characters/${id}`, {
+      method: "DELETE",
+    }),
   bootstrap: (id: string) =>
     request<{ character: Character; message: string }>(`/api/characters/${id}/bootstrap`, {
       method: "POST",

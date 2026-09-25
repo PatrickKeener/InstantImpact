@@ -8,7 +8,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Asset, Character, CharacterVersion
+from app.db.models import (
+    ApprovedSet,
+    ApprovedSetItem,
+    Asset,
+    AssetRating,
+    Character,
+    CharacterVersion,
+    ContentBrief,
+    Job,
+)
 from app.schemas.characters import CharacterCreate, CharacterUpdate, LockCharacterRequest
 from app.services.storage import get_layout
 from instantimpact_common.enums import CharacterStatus, VersionStatus
@@ -403,6 +412,124 @@ async def archive_character(db: AsyncSession, character_id: str) -> dict:
     c.status = CharacterStatus.ARCHIVED
     await db.commit()
     return character_to_out(await get_character(db, character_id))
+
+
+async def delete_character(db: AsyncSession, character_id: str) -> dict:
+    """Permanently remove a character, related rows, and files under data/."""
+    c = await get_character(db, character_id)
+    versions = list(c.versions or [])
+    lora_paths = [v.lora_path for v in versions if v.lora_path]
+
+    jobs = (
+        await db.execute(select(Job).where(Job.character_id == character_id))
+    ).scalars().all()
+    job_ids = [j.id for j in jobs]
+
+    assets = (
+        await db.execute(select(Asset).where(Asset.character_id == character_id))
+    ).scalars().all()
+    asset_ids = [a.id for a in assets]
+
+    if asset_ids:
+        ratings = (
+            await db.execute(select(AssetRating).where(AssetRating.asset_id.in_(asset_ids)))
+        ).scalars().all()
+        for row in ratings:
+            await db.delete(row)
+        dangling_items = (
+            await db.execute(
+                select(ApprovedSetItem).where(ApprovedSetItem.asset_id.in_(asset_ids))
+            )
+        ).scalars().all()
+        for row in dangling_items:
+            await db.delete(row)
+        for asset in assets:
+            await db.delete(asset)
+
+    sets = (
+        await db.execute(select(ApprovedSet).where(ApprovedSet.character_id == character_id))
+    ).scalars().all()
+    for approved in sets:
+        items = (
+            await db.execute(select(ApprovedSetItem).where(ApprovedSetItem.set_id == approved.id))
+        ).scalars().all()
+        for item in items:
+            await db.delete(item)
+        await db.delete(approved)
+
+    briefs = (
+        await db.execute(select(ContentBrief).where(ContentBrief.character_id == character_id))
+    ).scalars().all()
+    for brief in briefs:
+        await db.delete(brief)
+
+    for job in jobs:
+        await db.delete(job)
+
+    await db.delete(c)
+    await db.commit()
+
+    files_removed = _purge_character_files(character_id, job_ids, lora_paths)
+    return {"id": character_id, "deleted": True, "files_removed": files_removed}
+
+
+def _purge_character_files(
+    character_id: str, job_ids: list[str], lora_paths: list[str]
+) -> int:
+    import shutil
+    from pathlib import Path
+
+    from app.config import get_settings
+
+    layout = get_layout()
+    root = layout.root.resolve()
+    removed = 0
+
+    def _wipe(path: Path) -> int:
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            return 0
+        if not resolved.exists():
+            return 0
+        count = 0
+        if resolved.is_file():
+            resolved.unlink(missing_ok=True)
+            return 1
+        for child in resolved.rglob("*"):
+            if child.is_file():
+                count += 1
+        shutil.rmtree(resolved, ignore_errors=True)
+        return count
+
+    removed += _wipe(layout.character_dir(character_id))
+    removed += _wipe(layout.outputs_dir / character_id)
+    removed += _wipe(layout.approved_dir / character_id)
+    for job_id in job_ids:
+        removed += _wipe(layout.job_dir(job_id))
+    if layout.exports_dir.is_dir():
+        for extra in layout.exports_dir.glob(f"*{character_id}*"):
+            removed += _wipe(extra)
+
+    try:
+        comfy_loras = Path(get_settings().comfy_loras_dir).expanduser().resolve()
+    except Exception:
+        comfy_loras = None
+    if comfy_loras and comfy_loras.is_dir():
+        for rel in lora_paths:
+            name = Path(str(rel)).name
+            if not name:
+                continue
+            dest = (comfy_loras / name).resolve()
+            try:
+                dest.relative_to(comfy_loras)
+            except ValueError:
+                continue
+            if dest.is_file():
+                dest.unlink(missing_ok=True)
+                removed += 1
+    return removed
 
 
 def preview_prompts(c: Character, theme: str, **hints: str | None) -> dict:

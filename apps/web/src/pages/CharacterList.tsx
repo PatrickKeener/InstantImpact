@@ -23,6 +23,26 @@ export default function CharacterList() {
       .catch((e) => setError(e.message));
   }, []);
 
+  async function removeCharacter(c: Character) {
+    if (
+      !window.confirm(
+        `Delete ${c.display_name}? This removes the persona, stills, jobs, and files. It cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteCharacter(c.id);
+      setChars((prev) => prev.filter((x) => x.id !== c.id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function randomCharacter() {
     setBusy(true);
     setError(null);
@@ -98,6 +118,14 @@ export default function CharacterList() {
               <Link to={`/characters/${c.id}/studio`} className="btn-primary text-xs">
                 Studio
               </Link>
+              <button
+                type="button"
+                className="btn-ghost text-xs text-rose-200"
+                disabled={busy}
+                onClick={() => void removeCharacter(c)}
+              >
+                Delete
+              </button>
             </div>
             </div>
           </div>

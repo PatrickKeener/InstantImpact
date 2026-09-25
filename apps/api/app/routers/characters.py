@@ -118,6 +118,14 @@ async def archive_character(character_id: str, db: AsyncSession = Depends(get_db
         raise _err(e) from e
 
 
+@router.delete("/{character_id}")
+async def delete_character(character_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        return await svc.delete_character(db, character_id)
+    except svc.CharacterServiceError as e:
+        raise _err(e) from e
+
+
 @router.post("/{character_id}/preview-prompt", response_model=PromptPreviewResponse)
 async def preview_prompt(
     character_id: str, payload: PromptPreviewRequest, db: AsyncSession = Depends(get_db)

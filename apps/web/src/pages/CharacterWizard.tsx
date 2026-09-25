@@ -287,9 +287,35 @@ export default function CharacterWizard() {
           </p>
         </div>
         {character && (
-          <Link to={`/characters/${character.id}/studio`} className="btn-primary">
-            Open studio
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link to={`/characters/${character.id}/studio`} className="btn-primary">
+              Open studio
+            </Link>
+            <button
+              type="button"
+              className="btn-ghost text-rose-200"
+              disabled={busy}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    `Delete ${character.display_name}? This removes the persona, stills, jobs, and files.`
+                  )
+                ) {
+                  return;
+                }
+                setBusy(true);
+                api
+                  .deleteCharacter(character.id)
+                  .then(() => nav("/characters"))
+                  .catch((err) => {
+                    setError(err instanceof Error ? err.message : String(err));
+                    setBusy(false);
+                  });
+              }}
+            >
+              Delete
+            </button>
+          </div>
         )}
       </div>
 

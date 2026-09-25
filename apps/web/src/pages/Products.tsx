@@ -169,7 +169,7 @@ export default function Products() {
                     disabled={busy}
                     onClick={() => void remove(p.id)}
                   >
-                    Delete
+                    Delete product
                   </button>
                 </div>
               </li>

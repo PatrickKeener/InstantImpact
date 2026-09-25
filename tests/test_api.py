@@ -57,6 +57,19 @@ def _create_attested(client: TestClient, name: str = "Aria Test") -> dict:
     return r.json()
 
 
+def test_delete_character_removes_row(client: TestClient):
+    created = _create_attested(client, "Delete Me")
+    cid = created["id"]
+    assert client.get(f"/api/characters/{cid}").status_code == 200
+    gone = client.delete(f"/api/characters/{cid}")
+    assert gone.status_code == 200, gone.text
+    assert gone.json()["deleted"] is True
+    assert client.get(f"/api/characters/{cid}").status_code == 404
+    listed = client.get("/api/characters")
+    assert listed.status_code == 200
+    assert all(c["id"] != cid for c in listed.json())
+
+
 def test_health(client: TestClient):
     r = client.get("/api/system/health")
     assert r.status_code == 200

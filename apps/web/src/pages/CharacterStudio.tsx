@@ -506,6 +506,32 @@ export default function CharacterStudio() {
           <Link to={`/characters/${character.id}`} className="text-xs text-accent-soft">
             ← Edit character
           </Link>
+          <button
+            type="button"
+            className="ml-3 text-xs text-rose-300/90 underline-offset-2 hover:underline"
+            disabled={busy}
+            onClick={() => {
+              if (
+                !window.confirm(
+                  `Delete ${character.display_name}? This removes the persona, stills, jobs, and files.`
+                )
+              ) {
+                return;
+              }
+              setBusy(true);
+              api
+                .deleteCharacter(character.id)
+                .then(() => {
+                  window.location.href = "/characters";
+                })
+                .catch((e) => {
+                  setError(e instanceof Error ? e.message : String(e));
+                  setBusy(false);
+                });
+            }}
+          >
+            Delete character
+          </button>
           <h1 className="font-display mt-1 text-3xl">{character.display_name}</h1>
           <p className="mt-1 text-sm text-slate-400">
             Content studio · status{" "}
