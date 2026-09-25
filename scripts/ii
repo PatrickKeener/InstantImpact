@@ -2,9 +2,10 @@
 # InstantImpact one-terminal control (Linux / nemesis)
 #
 # Usage (from repo root OR any cwd):
-#   bash scripts/ii start              # API + worker + web + Comfy (background)
+#   bash scripts/ii start              # API + worker + web (Comfy starts per job)
 #   bash scripts/ii start --mock       # no Comfy, mock stills
-#   bash scripts/ii start --stop-vllm  # free GPU from docker vllm first
+#   bash scripts/ii start --with-comfy # also leave Comfy running (debug)
+#   bash scripts/ii start --stop-vllm  # stop docker vllm now (jobs already pause it)
 #   bash scripts/ii comfy              # start ComfyUI only (safe with Docker Compose)
 #   bash scripts/ii comfy --stop-vllm  # free GPU, then start Comfy only
 #   bash scripts/ii stop               # stop everything we started (+ ports)
@@ -37,20 +38,13 @@ shift || true
 
 case "$cmd" in
   start|up)
-    # Default: real gen stack with Comfy. Pass --mock to skip Comfy.
+    # App stack only. Comfy is started by the worker for each still job, then
+    # stopped so vLLM/Ollama can take the GPU back. Pass --with-comfy to keep
+    # Comfy warm, --stop-vllm to pause vLLM at startup instead of per-job.
     extra=()
-    has_mock=0
-    has_comfy=0
     for a in "$@"; do
-      case "$a" in
-        --mock) has_mock=1 ;;
-        --with-comfy) has_comfy=1 ;;
-      esac
       extra+=("$a")
     done
-    if [[ "$has_mock" -eq 0 && "$has_comfy" -eq 0 ]]; then
-      extra=(--with-comfy "${extra[@]}")
-    fi
     run_nemesis up.sh "${extra[@]}"
     echo ""
     echo "All services are running in the background. You can close this SSH session."

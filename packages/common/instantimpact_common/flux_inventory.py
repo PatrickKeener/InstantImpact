@@ -89,10 +89,40 @@ def find_model(comfy_root: Path | None, kind: str, filename: str) -> Path | None
     name = (filename or "").strip()
     if not comfy_root or not name:
         return None
+    wanted = name.lower()
     for rel in KIND_DIRS.get(kind, (f"models/{kind}",)):
-        candidate = comfy_root / rel / name
-        if candidate.is_file():
-            return candidate
+        folder = comfy_root / rel
+        direct = folder / name
+        if direct.is_file():
+            return direct
+        hit = _match_filename(folder, wanted)
+        if hit is not None:
+            return hit
+    models = comfy_root / "models"
+    if models.is_dir():
+        hit = _match_filename(models, wanted, depth=2)
+        if hit is not None:
+            return hit
+    return None
+
+
+def _match_filename(folder: Path, wanted: str, *, depth: int = 1) -> Path | None:
+    if not folder.is_dir() or depth < 0:
+        return None
+    try:
+        entries = list(folder.iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        if entry.is_file() and entry.name.lower() == wanted:
+            return entry
+    if depth == 0:
+        return None
+    for entry in entries:
+        if entry.is_dir():
+            hit = _match_filename(entry, wanted, depth=depth - 1)
+            if hit is not None:
+                return hit
     return None
 
 
@@ -204,7 +234,8 @@ def inspect_flux_still(
                     missing_nodes.append(n)
 
     if comfy_reachable is False:
-        status = "unreachable"
+        # Worker starts Comfy per job. Down at idle is fine when weights exist.
+        status = "missing_weights" if missing_weights else "idle"
     elif missing_nodes:
         status = "missing_nodes"
     elif missing_weights:
@@ -229,7 +260,7 @@ def inspect_flux_still(
 
 def fail_closed_message(report: dict[str, Any]) -> str | None:
     status = report.get("status")
-    if status in {"mock", "ok"}:
+    if status in {"mock", "ok", "idle"}:
         return None
     if status == "unreachable":
         return (
@@ -244,8 +275,10 @@ def fail_closed_message(report: dict[str, Any]) -> str | None:
     profile = "krea" if "krea" in str(report.get("unet") or "").lower() else (
         "bf16" if loader in {"split", "unet", "diffusion_model"} else "fp8"
     )
+    root = report.get("comfy_root") or "$INSTANTIMPACT_COMFY_DIR"
     return (
         f"Flux still pipeline missing weights: {missing}. "
+        f"Looked under {root}. "
         f"On the GPU host run: python scripts/bootstrap_models.py --profile {profile} "
         "--i-accept-licenses"
     )

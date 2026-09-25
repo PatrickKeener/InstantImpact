@@ -89,7 +89,7 @@ else
   if http_ok "${COMFY_URL}/system_stats"; then
     echo "  · comfy healthy at ${COMFY_URL}"
   else
-    echo "  · comfy not up. For real gen: bash scripts/ii comfy --stop-vllm"
+    echo "  · comfy idle — worker starts it per still job, then restores vLLM/Ollama"
   fi
 fi
 

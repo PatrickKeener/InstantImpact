@@ -7,11 +7,11 @@
 ```bash
 cd ~/InstantImpact
 
-# Start API + worker + web + Comfy (all background)
+# Start API + worker + web (Comfy is started per still job)
 bash scripts/ii start
 
-# Free GPU first (stop docker vllm)
-bash scripts/ii start --stop-vllm
+# Leave Comfy running (debug). Jobs still pause/restore vLLM+Ollama.
+bash scripts/ii start --with-comfy
 
 # Mock only (no Comfy)
 bash scripts/ii start --mock
@@ -44,8 +44,8 @@ bash scripts/nemesis/status.sh
 | Worker | yes | yes | yes |
 | Web :5173 | yes | yes | yes |
 | Redis | start docker if missing | no* | stops `instantimpact-redis` only |
-| ComfyUI | only with `--with-comfy` | only with `--with-comfy` | yes |
-| vLLM / Ollama | only with `--stop-vllm` on up | never | never |
+| ComfyUI | only with `--with-comfy` (worker also starts it per still job) | only with `--with-comfy` | yes |
+| vLLM / Ollama | paused by the worker during a job, then started again | never at InstantImpact stop | never |
 
 \* System `redis-server` from apt is left running (shared). Docker `instantimpact-redis` is stopped only with `--redis` or `--all`.
 

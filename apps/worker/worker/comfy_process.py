@@ -117,7 +117,7 @@ class ComfyProcess:
         comfy_dir = resolve_comfy_root(os.environ.get("INSTANTIMPACT_COMFY_DIR"))
         if comfy_dir is None:
             raise ComfyProcessError(
-                "ComfyUI not found. Set INSTANTIMPACT_COMFY_DIR to the directory that contains main.py."
+                "ComfyUI not found. Set INSTANTIMPACT_COMFY_DIR to the folder with main.py."
             )
         python = _comfy_python(comfy_dir)
         host = listen_host()
@@ -127,20 +127,30 @@ class ComfyProcess:
             f"main.py --listen {shlex.quote(host)} --port {port}"
         )
         user = _drop_to_owner(comfy_dir)
-        if user:
+        if os.name == "nt":
+            cmd = [str(python), "main.py", "--listen", host, "--port", str(port)]
+            cwd: str | None = str(comfy_dir)
+            log.info("starting Comfy in %s", comfy_dir)
+        elif user:
             cmd = ["sudo", "-u", user, "-H", "bash", "-c", inner]
+            cwd = None
             log.info("starting Comfy as %s in %s", user, comfy_dir)
         else:
             cmd = ["bash", "-c", inner]
+            cwd = None
             log.info("starting Comfy in %s", comfy_dir)
         handle = log_path().open("ab")
-        proc = subprocess.Popen(
-            cmd,
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=cwd,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        finally:
+            handle.close()
         pid_path().write_text(str(proc.pid), encoding="utf-8")
 
     async def _wait_healthy(self) -> None:

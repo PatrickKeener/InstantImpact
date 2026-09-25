@@ -41,6 +41,22 @@ from instantimpact_common.model_pins import (  # noqa: E402
 from instantimpact_common.offline import enforce_strict_offline  # noqa: E402
 
 
+def _load_dotenv() -> None:
+    """Pull KEY=VALUE lines from repo .env if they are not already exported."""
+    path = _REPO / ".env"
+    if not path.is_file():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("'").strip('"')
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def _token() -> str:
     return (
         os.environ.get("INSTANTIMPACT_HF_TOKEN")
@@ -51,7 +67,8 @@ def _token() -> str:
 
 
 def _download(url: str, dest: Path, *, token: str, expected_sha: str | None) -> None:
-    import httpx
+    from urllib.error import HTTPError
+    from urllib.request import Request, urlopen
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_suffix(dest.suffix + ".part")
@@ -61,36 +78,45 @@ def _download(url: str, dest: Path, *, token: str, expected_sha: str | None) -> 
     resume_from = part.stat().st_size if part.is_file() else 0
     if resume_from:
         headers["Range"] = f"bytes={resume_from}-"
-    with httpx.Client(timeout=None, follow_redirects=True, headers=headers) as client:
-        with client.stream("GET", url) as response:
-            if response.status_code == 401:
-                raise SystemExit(
-                    f"Hugging Face returned 401 for {url}. "
-                    "Accept the model license and set INSTANTIMPACT_HF_TOKEN."
-                )
-            if response.status_code == 416 and dest.is_file():
-                return
-            response.raise_for_status()
-            mode = "ab" if resume_from and response.status_code == 206 else "wb"
-            if mode == "wb" and part.exists():
-                part.unlink()
-            downloaded = resume_from if mode == "ab" else 0
-            total = response.headers.get("content-length")
-            total_i = int(total) + (resume_from if mode == "ab" else 0) if total else None
-            with part.open(mode) as fh:
-                for chunk in response.iter_bytes(1024 * 1024):
-                    fh.write(chunk)
-                    downloaded += len(chunk)
-                    if total_i:
-                        pct = 100 * downloaded / total_i
-                        gb_done = downloaded / 1e9
-                        gb_total = total_i / 1e9
-                        print(
-                            f"\r  {dest.name}: {gb_done:.2f} / {gb_total:.2f} GB ({pct:.0f}%)",
-                            end="",
-                            flush=True,
-                        )
-            print()
+    request = Request(url, headers=headers)
+    try:
+        response = urlopen(request, timeout=None)
+    except HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise SystemExit(
+                f"Hugging Face returned {exc.code} for {url}. "
+                "Accept the FLUX.1-dev and Krea licenses on huggingface.co, "
+                "then set INSTANTIMPACT_HF_TOKEN in .env."
+            ) from exc
+        if exc.code == 416 and dest.is_file():
+            return
+        raise SystemExit(f"Download failed ({exc.code}): {url}") from exc
+    status = getattr(response, "status", None) or response.getcode()
+    mode = "ab" if resume_from and status == 206 else "wb"
+    if mode == "wb" and part.exists():
+        part.unlink()
+    downloaded = resume_from if mode == "ab" else 0
+    total = response.headers.get("Content-Length")
+    total_i = int(total) + (resume_from if mode == "ab" else 0) if total else None
+    try:
+        with part.open(mode) as fh:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                fh.write(chunk)
+                downloaded += len(chunk)
+                if total_i:
+                    pct = 100 * downloaded / total_i
+                    print(
+                        f"\r  {dest.name}: {downloaded / 1e9:.2f} / "
+                        f"{total_i / 1e9:.2f} GB ({pct:.0f}%)",
+                        end="",
+                        flush=True,
+                    )
+        print()
+    finally:
+        response.close()
     if expected_sha:
         got = sha256_file(part)
         if got.lower() != expected_sha.lower():
@@ -99,9 +125,22 @@ def _download(url: str, dest: Path, *, token: str, expected_sha: str | None) -> 
                 f"SHA-256 mismatch for {dest.name}: got {got}, expected {expected_sha}"
             )
     part.replace(dest)
+    _chown_like_comfy(dest)
+
+
+def _chown_like_comfy(path: Path) -> None:
+    """Keep weights owned by the Comfy tree user when bootstrap runs as root."""
+    if not hasattr(os, "geteuid") or os.geteuid() != 0 or not path.exists():
+        return
+    try:
+        st = path.parent.stat()
+        os.chown(path, st.st_uid, st.st_gid)
+    except OSError:
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:
+    _load_dotenv()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--profile",

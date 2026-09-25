@@ -93,11 +93,17 @@ def test_split_missing_unet_is_missing_weights(tmp_path: Path):
     assert msg is not None
     assert "bootstrap_models.py" in msg
     assert "--profile krea" in msg
+    assert str(tmp_path) in msg
 
 
 def test_find_model_searches_text_encoders(tmp_path: Path):
     path = _touch(tmp_path, "models/text_encoders/clip_l.safetensors")
     assert find_model(tmp_path, "clip", "clip_l.safetensors") == path
+
+
+def test_find_model_walks_models_tree(tmp_path: Path):
+    path = _touch(tmp_path, "models/vae/flux/ae.safetensors")
+    assert find_model(tmp_path, "vae", "ae.safetensors") == path
 
 
 def test_missing_nodes_from_object_info(tmp_path: Path):
@@ -119,6 +125,26 @@ def test_missing_nodes_from_object_info(tmp_path: Path):
     )
     assert report["status"] == "missing_nodes"
     assert "CLIPTextEncodeFlux" in report["missing_nodes"]
+
+
+def test_comfy_down_with_weights_present_is_idle(tmp_path: Path):
+    _touch(tmp_path, "models/checkpoints/flux1-dev-fp8.safetensors")
+    report = inspect_flux_still(
+        FluxRuntime(
+            mock=False,
+            comfy_enabled=True,
+            loader="checkpoint",
+            comfy_root=tmp_path,
+            ckpt_name="flux1-dev-fp8.safetensors",
+            unet_name="x",
+            clip_name1="a",
+            clip_name2="b",
+            vae_name="c",
+        ),
+        comfy_reachable=False,
+    )
+    assert report["status"] == "idle"
+    assert fail_closed_message(report) is None
 
 
 def test_unverified_root_does_not_fail_closed():

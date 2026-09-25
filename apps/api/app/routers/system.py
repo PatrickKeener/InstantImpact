@@ -93,8 +93,6 @@ async def health():
     flux_still = _flux_report(comfy_healthy=comfy_healthy, object_info=object_info)
 
     status = "ok"
-    if settings.comfy_enabled and not settings.mock_generation and comfy_healthy is False:
-        status = "degraded"
     if not redis_ok and not settings.mock_generation:
         status = "degraded"
     if flux_still.get("status") in {"missing_weights", "missing_nodes", "unreachable"}:

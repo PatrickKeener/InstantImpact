@@ -34,7 +34,7 @@ See [`docs/deployment.md`](docs/deployment.md).
 ```bash
 cd ~/InstantImpact
 
-bash scripts/ii start --stop-vllm   # API + worker + web + Comfy (background)
+bash scripts/ii start               # API + worker + web; Comfy starts per job, then vLLM/Ollama return
 bash scripts/ii status
 bash scripts/ii logs                # optional; Ctrl+C keeps services running
 bash scripts/ii stop                # when done

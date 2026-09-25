@@ -132,7 +132,9 @@ def main() -> None:
     )
     log.info("weights: %s", _weights_summary())
     pause = os.environ.get("INSTANTIMPACT_GPU_PAUSE_CONTAINERS") or "(none)"
+    life = os.environ.get("INSTANTIMPACT_COMFY_LIFECYCLE") or "job"
     log.info("gpu services paused per job: %s", pause)
+    log.info("comfy lifecycle=%s (job=stop after stills, keep=unload only)", life)
     run_worker(WorkerSettings)  # type: ignore[arg-type]
 
 

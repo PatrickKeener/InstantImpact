@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from worker.gpu_lock import GpuLock, is_cancel_requested
+from worker.gpu_services import GpuServiceError
+from worker.gpu_session import GpuSession
 from worker.paths import resolve_request_json
 
 
@@ -44,10 +46,30 @@ async def process_lora_train(ctx: dict[str, Any], job_id: str, request_path: str
         )
         return {"ok": False}
 
+    session = GpuSession(kind="train")
     try:
-        await _publish(redis, {"job_id": job_id, "event": "running", "message": "GPU acquired — training LoRA"})
+        message = await session.acquire()
+    except GpuServiceError as exc:
+        await _publish(
+            redis,
+            {
+                "job_id": job_id,
+                "event": "failed",
+                "error_code": "gpu_service_pause_failed",
+                "message": str(exc),
+            },
+        )
+        await lock.release()
+        return {"ok": False}
+
+    try:
+        await _publish(
+            redis,
+            {"job_id": job_id, "event": "running", "message": f"{message} — training LoRA"},
+        )
         return await _run_train(redis, snapshot, request_path=path)
     finally:
+        await session.release()
         await lock.release()
 
 
@@ -147,7 +169,6 @@ async def _run_train(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         encoding="utf-8",
     )
 
-    await _free_gpu(redis, job_id)
     if await is_cancel_requested(redis, job_id):
         await _publish(redis, {"job_id": job_id, "event": "cancelled"})
         return {"ok": False, "cancelled": True}
@@ -290,29 +311,6 @@ def _kill_pg(pid: int | None, sig: signal.Signals = signal.SIGTERM) -> None:
             os.kill(pid, sig)
         except OSError:
             pass
-
-
-async def _free_gpu(redis: Any, job_id: str) -> None:
-    await _publish(redis, {"job_id": job_id, "event": "log", "message": "Freeing GPU (vLLM + Comfy unload)"})
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "docker",
-            "stop",
-            "vllm",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
-    except Exception:
-        pass
-    comfy = os.environ.get("INSTANTIMPACT_COMFY_URL", "http://127.0.0.1:8188")
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.post(f"{comfy.rstrip('/')}/free", json={"unload_models": True, "free_memory": True})
-    except Exception:
-        pass
 
 
 def _cuda_available() -> bool:

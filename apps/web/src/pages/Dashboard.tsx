@@ -54,15 +54,20 @@ export default function Dashboard() {
         </div>
       )}
 
-      {health?.comfy_healthy === false && (
+      {health?.comfy_healthy === false && health?.pipelines?.flux_still === "idle" && (
+        <div className="card border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+          ComfyUI is idle. The worker starts it for each still job, then stops it and
+          brings vLLM / Ollama back so other apps can use the GPU.
+        </div>
+      )}
+      {health?.comfy_healthy === false &&
+        health?.pipelines?.flux_still &&
+        health.pipelines.flux_still !== "idle" &&
+        health.pipelines.flux_still !== "mock" &&
+        health.pipelines.flux_still !== "ok" &&
+        health.pipelines.flux_still !== "missing_weights" && (
         <div className="card border-amber-500/30 bg-amber-950/30 p-4 text-sm text-amber-100">
-          ComfyUI is not reachable at <code className="text-amber-50">127.0.0.1:8188</code>. Docker
-          Compose does not start it. On nemesis:
-          <pre className="mt-2 overflow-x-auto rounded-lg bg-black/30 p-3 text-xs text-amber-50">
-            {`curl -sS http://127.0.0.1:8188/system_stats
-bash scripts/ii comfy --stop-vllm`}
-          </pre>
-          Then refresh this page. Health should read <strong>ok</strong> and comfy <strong>ok</strong>.
+          ComfyUI is not reachable at <code className="text-amber-50">127.0.0.1:8188</code>.
         </div>
       )}
 
