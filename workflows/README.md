@@ -22,6 +22,15 @@ Runnable **Flux FP8** graph using `CheckpointLoaderSimple` (matches Comfy-Org `f
 
 Defaults: CFG **1.0**, steps **28**. No LoRA.
 
+Optional stages (same node ids on every template; the worker drops unused ones):
+
+| Nodes | Stage | Dropped when |
+|-------|--------|----------------|
+| 12 | Anatomy/realism LoRA | no `DETAIL_LORA_NAME` |
+| 15–19 + 14 | Pixel hi-res (decode → optional upscale model → lanczos → encode → low denoise) | `hires_fix` is false |
+| 16–17 | `UpscaleModelLoader` + `ImageUpscaleWithModel` | no `UPSCALE_MODEL_NAME` (lanczos only) |
+| 30–34 | PuLID-Flux identity | no model filename or no face ref |
+
 ## `flux_still_character_lora_v1.json`
 
 Same as above plus **LoraLoader** (`LORA_NAME`, `LORA_STRENGTH`). Selected automatically when the character version has `pipeline_params.flux.comfy_lora_name` after **Register LoRA**.
@@ -37,4 +46,4 @@ Same as above plus **LoraLoader** (`LORA_NAME`, `LORA_STRENGTH`). Selected autom
 | `CLIP_NAME1` / `CLIP_NAME2` | CLIP-L and T5-XXL | `models/clip/` |
 | `VAE_NAME` | Flux autoencoder | `models/vae/` |
 
-Every other node id matches the fp8 templates, so the detail-LoRA and hi-res bypasses behave identically. Selected by `INSTANTIMPACT_COMFY_LOADER=split`.
+Every other node id matches the fp8 templates, so the detail-LoRA and hi-res bypasses behave identically. Selected by `INSTANTIMPACT_COMFY_LOADER=split`. Point `INSTANTIMPACT_COMFY_UNET_NAME` at `flux1-dev.safetensors` or the photoreal `flux1-krea-dev.safetensors` (see `scripts/bootstrap_models.py --profile krea`).

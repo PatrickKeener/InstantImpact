@@ -67,6 +67,8 @@ async def _run_train(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     trigger = snapshot.get("trigger_word") or meta.get("trigger_word") or "sks_persona_v1"
     name = meta.get("run_name") or f"ii_{job_id[:8]}"
     steps = int(meta.get("steps") or 1500)
+    linear = int(meta.get("linear") or os.environ.get("INSTANTIMPACT_LORA_DIM") or 32)
+    linear = max(8, min(linear, 128))
 
     if not dataset_dir.is_dir():
         await _publish(
@@ -140,6 +142,7 @@ async def _run_train(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             dataset_dir=str(dataset_dir),
             training_folder=str(training_folder),
             steps=steps,
+            linear=linear,
         ),
         encoding="utf-8",
     )

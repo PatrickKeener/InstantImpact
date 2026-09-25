@@ -64,6 +64,60 @@ def test_health(client: TestClient):
     assert body["app"] == "instantimpact"
     assert "redis_ok" in body
     assert body["mvp"]["mock_generation"] is True
+    assert body["pipelines"]["flux_still"] == "mock"
+
+
+def test_seed_gallery_fails_closed_when_split_weights_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    data = tmp_path / "data"
+    (data / "db").mkdir(parents=True)
+    comfy = tmp_path / "ComfyUI"
+    (comfy / "models").mkdir(parents=True)
+    db = data / "db" / "ii.sqlite"
+    monkeypatch.setenv("INSTANTIMPACT_DATA_DIR", str(data))
+    monkeypatch.setenv("INSTANTIMPACT_DATABASE_URL", f"sqlite+aiosqlite:///{db.as_posix()}")
+    monkeypatch.setenv("INSTANTIMPACT_MOCK_GENERATION", "false")
+    monkeypatch.setenv("INSTANTIMPACT_COMFY_ENABLED", "true")
+    monkeypatch.setenv("INSTANTIMPACT_COMFY_DIR", str(comfy))
+    monkeypatch.setenv("INSTANTIMPACT_COMFY_LOADER", "split")
+    monkeypatch.setenv("INSTANTIMPACT_COMFY_UNET_NAME", "flux1-krea-dev.safetensors")
+    monkeypatch.setenv("INSTANTIMPACT_REQUIRE_AUTH_TOKEN", "false")
+    monkeypatch.setenv("INSTANTIMPACT_API_TOKEN", "")
+    monkeypatch.setenv("INSTANTIMPACT_HOST", "127.0.0.1")
+    monkeypatch.setenv("INSTANTIMPACT_REDIS_URL", "redis://127.0.0.1:1/0")
+    monkeypatch.setenv("INSTANTIMPACT_CORS_ORIGINS", "http://127.0.0.1:5173")
+
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    import app.db.session as db_session
+
+    db_session._engine = None
+    db_session._session_factory = None
+
+    from app.main import create_app
+
+    app = create_app()
+    with TestClient(app) as c:
+        created = c.post(
+            "/api/characters",
+            json={
+                "display_name": "Krea Gate",
+                "synthetic_confirmed": True,
+                "not_real_person_attested": True,
+                "attestation_text": "synthetic adult persona for tests",
+            },
+        )
+        assert created.status_code == 200, created.text
+        cid = created.json()["id"]
+        assert c.post(f"/api/characters/{cid}/bootstrap").status_code == 200
+        seed = c.post(f"/api/characters/{cid}/seed-gallery", json={"count": 1, "themes": ["portrait"]})
+        assert seed.status_code == 503, seed.text
+        assert "flux1-krea-dev.safetensors" in seed.json()["detail"]
+        assert "bootstrap_models.py" in seed.json()["detail"]
+
+    get_settings.cache_clear()
+    db_session._engine = None
+    db_session._session_factory = None
 
 
 def test_media_404(client: TestClient):

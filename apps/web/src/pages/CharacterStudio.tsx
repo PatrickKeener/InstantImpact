@@ -42,6 +42,9 @@ type FluxKnobs = {
   hires_denoise: number;
   detail_lora_name: string;
   detail_lora_strength: number;
+  upscale_model_name: string;
+  pulid_model_name: string;
+  pulid_strength: number;
 };
 
 const DEFAULT_FLUX_KNOBS: FluxKnobs = {
@@ -52,6 +55,9 @@ const DEFAULT_FLUX_KNOBS: FluxKnobs = {
   hires_denoise: 0.4,
   detail_lora_name: "",
   detail_lora_strength: 0.6,
+  upscale_model_name: "",
+  pulid_model_name: "",
+  pulid_strength: 0.7,
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -76,6 +82,9 @@ function readFluxKnobs(character: Character | null): FluxKnobs {
     hires_denoise: num(flux.hires_denoise, DEFAULT_FLUX_KNOBS.hires_denoise),
     detail_lora_name: flux.detail_lora_name != null ? String(flux.detail_lora_name) : "",
     detail_lora_strength: num(flux.detail_lora_strength, DEFAULT_FLUX_KNOBS.detail_lora_strength),
+    upscale_model_name: flux.upscale_model_name != null ? String(flux.upscale_model_name) : "",
+    pulid_model_name: flux.pulid_model_name != null ? String(flux.pulid_model_name) : "",
+    pulid_strength: num(flux.pulid_strength, DEFAULT_FLUX_KNOBS.pulid_strength),
   };
 }
 
@@ -107,6 +116,7 @@ export default function CharacterStudio() {
   const [loraStrength, setLoraStrength] = useState(0.85);
   const [trainSteps, setTrainSteps] = useState(1500);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("all");
+  const [assetSort, setAssetSort] = useState<"newest" | "match">("newest");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [setTitle, setSetTitle] = useState("Approved pack");
@@ -154,10 +164,11 @@ export default function CharacterStudio() {
     return () => clearInterval(t);
   }, [activeJobs.length, refresh]);
 
-  const visible = useMemo(
-    () => (filter === "all" ? assets : assets.filter((a) => a.decision === filter)),
-    [assets, filter]
-  );
+  const visible = useMemo(() => {
+    const list = filter === "all" ? assets : assets.filter((a) => a.decision === filter);
+    if (assetSort !== "match") return list;
+    return [...list].sort((a, b) => (b.consistency_score ?? -1) - (a.consistency_score ?? -1));
+  }, [assets, filter, assetSort]);
 
   useEffect(() => {
     if (lightbox === null) return;
@@ -255,6 +266,9 @@ export default function CharacterStudio() {
             hires_denoise: fluxKnobs.hires_denoise,
             detail_lora_name: fluxKnobs.detail_lora_name.trim() || null,
             detail_lora_strength: fluxKnobs.detail_lora_strength,
+            upscale_model_name: fluxKnobs.upscale_model_name.trim() || null,
+            pulid_model_name: fluxKnobs.pulid_model_name.trim() || null,
+            pulid_strength: fluxKnobs.pulid_strength,
           },
         },
       });
@@ -757,10 +771,10 @@ export default function CharacterStudio() {
       <section className="card space-y-4 p-5">
         <h2 className="font-display text-xl">Still quality</h2>
         <p className="text-sm text-slate-400">
-          Phase 1 knobs for this character version. Keep CFG at 1.0 on stock Flux.1-dev.
-          After you switch to a de-distilled checkpoint, raise CFG to about 3–4 so the
-          negative prompt actually applies. Detail LoRA is a filename in Comfy{" "}
-          <code>models/loras</code>.
+          Keep CFG at 1.0 on stock Flux.1-dev. After a de-distilled checkpoint, raise CFG
+          to about 3–4 so the negative prompt applies. Hi-res now decodes to pixels, optionally
+          runs an upscale model from Comfy <code>models/upscale_models</code>, then refines.
+          PuLID uses a generate-only face ref and a file in Comfy <code>models/pulid</code>.
         </p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div>
@@ -843,6 +857,38 @@ export default function CharacterStudio() {
             />
           </div>
         </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="sm:col-span-2">
+            <label className="label">Upscale model filename</label>
+            <input
+              className="input font-mono text-xs"
+              placeholder="optional — e.g. 4x-UltraSharp.pth"
+              value={fluxKnobs.upscale_model_name}
+              onChange={(e) => patchFlux({ upscale_model_name: e.target.value })}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="label">PuLID model filename</label>
+            <input
+              className="input font-mono text-xs"
+              placeholder="optional — e.g. pulid_flux_v0.9.1.safetensors"
+              value={fluxKnobs.pulid_model_name}
+              onChange={(e) => patchFlux({ pulid_model_name: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="label">PuLID strength</label>
+            <input
+              type="number"
+              min={0}
+              max={2}
+              step={0.05}
+              className="input"
+              value={fluxKnobs.pulid_strength}
+              onChange={(e) => patchFlux({ pulid_strength: Number(e.target.value) })}
+            />
+          </div>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -856,8 +902,8 @@ export default function CharacterStudio() {
         </div>
         <p className="text-xs text-slate-500">
           Identity drift after the second pass: lower hi-res denoise to 0.25–0.35 before raising
-          character LoRA strength. Checkpoint swap is still an env setting (
-          <code>INSTANTIMPACT_COMFY_CKPT_NAME</code>), not this panel.
+          character LoRA strength. Empty upscale model uses lanczos (still sharper than latent
+          nearest-exact). PuLID stays off until a model filename is set and a face ref exists.
         </p>
       </section>
 
@@ -1181,6 +1227,24 @@ cd /home/pkeener/InstantImpact/apps/worker
                 {f}
               </button>
             ))}
+            <button
+              type="button"
+              className={`rounded-full px-2.5 py-0.5 text-xs ${
+                assetSort === "newest" ? "bg-accent text-white" : "bg-white/5 text-slate-400"
+              }`}
+              onClick={() => setAssetSort("newest")}
+            >
+              newest
+            </button>
+            <button
+              type="button"
+              className={`rounded-full px-2.5 py-0.5 text-xs ${
+                assetSort === "match" ? "bg-accent text-white" : "bg-white/5 text-slate-400"
+              }`}
+              onClick={() => setAssetSort("match")}
+            >
+              best match
+            </button>
             <button
               type="button"
               className="btn-ghost text-xs text-red-300/90 hover:text-red-200"

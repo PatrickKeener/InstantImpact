@@ -38,34 +38,11 @@ def _safe_data_path(rel: str) -> Path | None:
     return target if target.is_file() else None
 
 
-def _caption_for_asset(
-    *,
-    trigger: str,
-    asset: Asset,
-    appearance: dict[str, Any],
-) -> str:
-    """Simple MVP caption: trigger + what varies; keep identity light for LoRA."""
-    parts = [trigger, "adult woman 21+", "photorealistic photograph"]
-    for key in ("hair_color", "hair_style", "eye_color", "body_type"):
-        val = appearance.get(key)
-        if val:
-            parts.append(str(val))
-    # Pull theme-ish words from original prompt if present
-    pos = (asset.prompt_positive or "")[:200]
-    for token in ("portrait", "bedroom", "lingerie", "outdoor", "glamour", "mirror", "gym"):
-        if token in pos.lower():
-            parts.append(token)
-    if asset.seed is not None:
-        parts.append("unique pose and framing")
-    # de-dupe
-    seen: set[str] = set()
-    out: list[str] = []
-    for p in parts:
-        k = p.lower()
-        if k not in seen:
-            seen.add(k)
-            out.append(p)
-    return ", ".join(out)
+def _caption_for_asset(*, trigger: str, asset: Asset) -> str:
+    """Trigger + pose/light/outfit. Identity stays on the trigger for LoRA."""
+    from instantimpact_prompts.train_caption import caption_from_asset
+
+    return caption_from_asset(trigger=trigger, asset=asset)
 
 
 async def build_training_dataset(
@@ -132,13 +109,15 @@ async def build_training_dataset(
         stem = f"{i + 1:03d}"
         dest = ds_dir / f"{stem}{ext}"
         shutil.copy2(src, dest)
-        cap = _caption_for_asset(trigger=trigger, asset=asset, appearance=appearance)
+        cap = _caption_for_asset(trigger=trigger, asset=asset)
         (ds_dir / f"{stem}.txt").write_text(cap + "\n", encoding="utf-8")
         captions.append({"file": dest.name, "caption": cap, "asset_id": asset.id})
         # First few into refs pack
         if i < 8:
             ref_name = f"ref_{stem}{ext}"
             shutil.copy2(src, refs_dir / ref_name)
+        if i == 0:
+            shutil.copy2(src, refs_dir / f"face_primary{ext}")
         copied += 1
 
     if copied < min_images:
@@ -156,13 +135,14 @@ async def build_training_dataset(
     version.prompt_contract_json = contract.model_dump()
     version.ref_pack_path = str(refs_dir.relative_to(layout.root)).replace("\\", "/")
 
+    dim = max(8, min(int(get_settings().lora_dim), 128))
     train_cfg = {
         "tool": "ostris_ai_toolkit",
         "base": "flux",
         "trigger_word": trigger,
         "dataset_dir": str(ds_dir),
         "output_dir": str(lora_dir),
-        "network": {"type": "lora", "linear": 16, "linear_alpha": 16},
+        "network": {"type": "lora", "linear": dim, "linear_alpha": dim},
         "steps_suggested": 1500,
         "lr_suggested": 1e-4,
         "resolution": 1024,

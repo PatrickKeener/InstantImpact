@@ -16,10 +16,13 @@ from instantimpact_comfy.binder import (
     DETAIL_LORA_VARS,
     FLUX_STILL_SPLIT_LORA_REQUIRED_VARS,
     FLUX_STILL_SPLIT_REQUIRED_VARS,
-    HIRES_BYPASS_ORDER,
     HIRES_VARS,
+    PULID_VARS,
+    UPSCALE_MODEL_VARS,
     bind_workflow,
     bypass_node,
+    drop_hires_subgraph,
+    drop_pulid,
     load_workflow,
     nodes_only,
     validate_placeholders,
@@ -51,6 +54,13 @@ HIRES_VALUES = {
     "HIRES_SAMPLER_NAME": "euler",
     "HIRES_SCHEDULER": "simple",
 }
+UPSCALE_VALUES = {"UPSCALE_MODEL_NAME": "4x-UltraSharp.pth"}
+PULID_VALUES = {
+    "PULID_MODEL_NAME": "pulid_flux_v0.9.1.safetensors",
+    "PULID_STRENGTH": 0.7,
+    "PULID_PROVIDER": "CUDA",
+    "FACE_REF_IMAGE": "ii_pulid_test.png",
+}
 
 
 @pytest.mark.parametrize(
@@ -66,17 +76,34 @@ HIRES_VALUES = {
 )
 def test_split_template_binds_with_every_optional_stage(name, required, extra):
     template = load_workflow(WORKFLOWS / name)
-    assert validate_placeholders(template, required | DETAIL_LORA_VARS | HIRES_VARS) == []
+    assert (
+        validate_placeholders(
+            template, required | DETAIL_LORA_VARS | HIRES_VARS | UPSCALE_MODEL_VARS | PULID_VARS
+        )
+        == []
+    )
 
     graph = nodes_only(
         bind_workflow(
             template,
-            {**BASE_VARS, **extra, **DETAIL_VARS, **HIRES_VALUES, **_split_weight_vars()},
+            {
+                **BASE_VARS,
+                **extra,
+                **DETAIL_VARS,
+                **HIRES_VALUES,
+                **UPSCALE_VALUES,
+                **PULID_VALUES,
+                **_split_weight_vars(),
+            },
         )
     )
     assert graph["20"]["class_type"] == "UNETLoader"
     assert graph["21"]["inputs"]["type"] == "flux"
     assert graph["8"]["inputs"]["vae"] == ["22", 0]
+    assert graph["18"]["class_type"] == "ImageScale"
+    assert graph["19"]["inputs"]["vae"] == ["22", 0]
+    assert graph["3"]["inputs"]["model"] == ["34", 0]
+    assert graph["34"]["class_type"] == "ApplyPulidFlux"
     # CheckpointLoaderSimple's null clip is the whole reason this path exists.
     assert not any(n["class_type"] == "CheckpointLoaderSimple" for n in graph.values())
     assert "{{" not in str(graph)
@@ -96,8 +123,8 @@ def test_split_template_binds_with_every_optional_stage(name, required, extra):
 def test_split_template_binds_with_detail_lora_and_hires_bypassed(name, required, extra):
     template = load_workflow(WORKFLOWS / name)
     template = bypass_node(template, DETAIL_LORA_NODE_ID, DETAIL_LORA_OUTPUTS)
-    for node_id, outputs in HIRES_BYPASS_ORDER:
-        template = bypass_node(template, node_id, outputs)
+    template = drop_pulid(template)
+    template = drop_hires_subgraph(template)
     assert validate_placeholders(template, required) == []
 
     graph = nodes_only(bind_workflow(template, {**BASE_VARS, **extra, **_split_weight_vars()}))

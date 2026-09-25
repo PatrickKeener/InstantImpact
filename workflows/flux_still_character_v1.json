@@ -2,9 +2,9 @@
   "_meta": {
     "name": "flux_still_character_v1",
     "description": "Flux FP8 still with CLIPTextEncodeFlux: CLIP-L gets shot intent, T5 gets the full prompt. KSampler CFG remains 1.0.",
-    "required_custom_nodes": [],
+    "required_custom_nodes": ["PulidFluxModelLoader", "PulidFluxEvaClipLoader", "PulidFluxInsightFaceLoader", "ApplyPulidFlux"],
     "checkpoint": "flux1-dev-fp8.safetensors (ComfyUI/models/checkpoints/)",
-    "note": "Node 12 is an optional anatomy/realism LoRA; nodes 13-14 are the optional hi-res refinement pass. The worker bypasses whichever are not configured."
+    "note": "Node 12 is an optional anatomy/realism LoRA. Nodes 15-19 + 14 are the pixel hi-res pass (decode, optional upscale model, lanczos, encode, low denoise). Nodes 30-34 are optional PuLID-Flux. The worker drops whichever are not configured. required_custom_nodes apply only when PuLID is enabled."
   },
   "4": {
     "class_type": "CheckpointLoaderSimple",
@@ -20,6 +20,41 @@
       "strength_clip": 0.0,
       "model": ["4", 0],
       "clip": ["4", 1]
+    }
+  },
+  "30": {
+    "class_type": "PulidFluxModelLoader",
+    "inputs": {
+      "pulid_file": "{{PULID_MODEL_NAME}}"
+    }
+  },
+  "31": {
+    "class_type": "PulidFluxEvaClipLoader",
+    "inputs": {}
+  },
+  "32": {
+    "class_type": "PulidFluxInsightFaceLoader",
+    "inputs": {
+      "provider": "{{PULID_PROVIDER}}"
+    }
+  },
+  "33": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{FACE_REF_IMAGE}}"
+    }
+  },
+  "34": {
+    "class_type": "ApplyPulidFlux",
+    "inputs": {
+      "model": ["12", 0],
+      "pulid_flux": ["30", 0],
+      "eva_clip": ["31", 0],
+      "face_analysis": ["32", 0],
+      "image": ["33", 0],
+      "weight": "{{PULID_STRENGTH}}",
+      "start_at": 0.0,
+      "end_at": 1.0
     }
   },
   "6": {
@@ -55,20 +90,47 @@
       "sampler_name": "{{SAMPLER_NAME}}",
       "scheduler": "{{SCHEDULER}}",
       "denoise": 1.0,
-      "model": ["12", 0],
+      "model": ["34", 0],
       "positive": ["6", 0],
       "negative": ["7", 0],
       "latent_image": ["5", 0]
     }
   },
-  "13": {
-    "class_type": "LatentUpscale",
+  "15": {
+    "class_type": "VAEDecode",
     "inputs": {
-      "upscale_method": "nearest-exact",
+      "samples": ["3", 0],
+      "vae": ["4", 2]
+    }
+  },
+  "16": {
+    "class_type": "UpscaleModelLoader",
+    "inputs": {
+      "model_name": "{{UPSCALE_MODEL_NAME}}"
+    }
+  },
+  "17": {
+    "class_type": "ImageUpscaleWithModel",
+    "inputs": {
+      "upscale_model": ["16", 0],
+      "image": ["15", 0]
+    }
+  },
+  "18": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "upscale_method": "lanczos",
       "width": "{{HIRES_WIDTH}}",
       "height": "{{HIRES_HEIGHT}}",
       "crop": "disabled",
-      "samples": ["3", 0]
+      "image": ["17", 0]
+    }
+  },
+  "19": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": ["18", 0],
+      "vae": ["4", 2]
     }
   },
   "14": {
@@ -80,10 +142,10 @@
       "sampler_name": "{{HIRES_SAMPLER_NAME}}",
       "scheduler": "{{HIRES_SCHEDULER}}",
       "denoise": "{{HIRES_DENOISE}}",
-      "model": ["12", 0],
+      "model": ["34", 0],
       "positive": ["6", 0],
       "negative": ["7", 0],
-      "latent_image": ["13", 0]
+      "latent_image": ["19", 0]
     }
   },
   "8": {

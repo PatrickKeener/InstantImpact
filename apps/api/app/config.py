@@ -30,11 +30,22 @@ class Settings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
     comfy_url: str = "http://127.0.0.1:8188"
     comfy_enabled: bool = False
+    comfy_dir: str = ""
+    # checkpoint = packed file; split = UNET + CLIP + VAE (bf16 Flux / Krea)
+    comfy_loader: str = "checkpoint"
     # Checkpoint filename inside ComfyUI/models/checkpoints/
     comfy_ckpt_name: str = "flux1-dev-fp8.safetensors"
+    comfy_unet_name: str = "flux1-dev.safetensors"
+    comfy_unet_dtype: str = "default"
+    comfy_clip_name1: str = "clip_l.safetensors"
+    comfy_clip_name2: str = "t5xxl_fp16.safetensors"
+    comfy_vae_name: str = "ae.safetensors"
     comfy_timeout_seconds: float = 600.0
     # Where to install character LoRAs for Comfy (models/loras)
     comfy_loras_dir: str = str(Path.home() / "ComfyUI" / "models" / "loras")
+    detail_lora_name: str = ""
+    comfy_upscale_model: str = ""
+    pulid_model: str = ""
 
     strict_offline: bool = False
     require_auth_token: bool = False
@@ -56,6 +67,7 @@ class Settings(BaseSettings):
     ai_toolkit_dir: str = ""
     hf_token: str = ""
     lora_train_steps: int = 1500
+    lora_dim: int = 32
     stop_vllm_before_train: bool = True
 
     def resolved_data_dir(self) -> Path:
@@ -68,6 +80,24 @@ class Settings(BaseSettings):
         from instantimpact_common.offline import bind_is_loopback
 
         return not bind_is_loopback(self.host)
+
+    def flux_runtime(self):
+        from instantimpact_common.flux_inventory import FluxRuntime, resolve_comfy_root
+
+        return FluxRuntime(
+            mock=self.mock_generation,
+            comfy_enabled=self.comfy_enabled,
+            loader=(self.comfy_loader or "checkpoint").strip().lower(),
+            comfy_root=resolve_comfy_root(self.comfy_dir or None),
+            ckpt_name=self.comfy_ckpt_name,
+            unet_name=self.comfy_unet_name,
+            clip_name1=self.comfy_clip_name1,
+            clip_name2=self.comfy_clip_name2,
+            vae_name=self.comfy_vae_name,
+            detail_lora_name=(self.detail_lora_name or "").strip() or None,
+            upscale_model_name=(self.comfy_upscale_model or "").strip() or None,
+            pulid_model_name=(self.pulid_model or "").strip() or None,
+        )
 
     def auth_is_required(self) -> bool:
         """Token required when explicitly set, or when LAN-bound with a token configured."""

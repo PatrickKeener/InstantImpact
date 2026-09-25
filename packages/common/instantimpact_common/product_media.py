@@ -43,6 +43,19 @@ def paste_product_corner(base, product_path: Path, *, margin: int = 24, max_widt
     return canvas.convert("RGB")
 
 
+def shot_meta_from_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Theme/outfit/pose/location for training captions and disclosure sidecars."""
+    meta: dict[str, Any] = {}
+    for key in ("theme", "outfit_hint", "pose_hint", "location_hint", "extra_prompt"):
+        value = item.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            meta[key] = text
+    return meta
+
+
 def product_meta_from_item(item: dict[str, Any]) -> dict[str, Any]:
     if not item.get("product_id"):
         return {}

@@ -32,6 +32,18 @@ class ComfyClient:
         except Exception:
             return False
 
+    async def object_info(self) -> dict[str, Any] | None:
+        """Node class inventory. None if Comfy is too old or unreachable."""
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.get(f"{self.base_url}/object_info")
+                if r.status_code != 200:
+                    return None
+                data = r.json()
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+
     async def queue_prompt(self, workflow: dict[str, Any]) -> str:
         """Submit an API-format prompt graph. Returns prompt_id."""
         # Comfy only accepts node id keys; drop metadata
@@ -163,6 +175,21 @@ class ComfyClient:
                         }
                     )
         return images
+
+    async def upload_image(
+        self, data: bytes, filename: str, *, overwrite: bool = True
+    ) -> str:
+        """Upload a still into Comfy's input folder. Returns the LoadImage filename."""
+        files = {"image": (filename, data, "image/png")}
+        form = {"overwrite": "true" if overwrite else "false", "type": "input"}
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.post(f"{self.base_url}/upload/image", files=files, data=form)
+            if r.status_code >= 400:
+                raise ComfyClientError(f"Comfy /upload/image failed ({r.status_code}): {r.text}")
+            payload = r.json()
+        name = str(payload.get("name") or filename)
+        subfolder = str(payload.get("subfolder") or "").strip().strip("/")
+        return f"{subfolder}/{name}" if subfolder else name
 
     async def free_memory(self, unload_models: bool = True) -> None:
         """Best-effort VRAM reclaim."""

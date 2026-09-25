@@ -6,7 +6,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "worker"))
 
-from worker.tasks.stills import _ensure_adult_prompt, _hires_size, _sampler_cfg, _size_for_aspect
+from worker.tasks.stills import (
+    _ensure_adult_prompt,
+    _face_ref_path,
+    _hires_size,
+    _sampler_cfg,
+    _size_for_aspect,
+)
 
 
 def test_aspect_ratio_wins_over_legacy_default_dimensions():
@@ -57,3 +63,22 @@ def test_sampler_cfg_honors_de_distilled_range():
     assert _sampler_cfg({"cfg": 3.5}) == 3.5
     assert _sampler_cfg({"cfg": 0.2}) == 1.0
     assert _sampler_cfg({"cfg": 99}) == 8.0
+
+
+def test_face_ref_prefers_named_primary(tmp_path):
+    refs = tmp_path / "refs"
+    refs.mkdir()
+    (refs / "ref_001.png").write_bytes(b"a")
+    (refs / "face_primary.png").write_bytes(b"b")
+    chosen = _face_ref_path(refs)
+    assert chosen is not None
+    assert chosen.name == "face_primary.png"
+
+
+def test_face_ref_falls_back_to_first_image(tmp_path):
+    refs = tmp_path / "refs"
+    refs.mkdir()
+    (refs / "ref_002.png").write_bytes(b"a")
+    chosen = _face_ref_path(refs)
+    assert chosen is not None
+    assert chosen.name == "ref_002.png"

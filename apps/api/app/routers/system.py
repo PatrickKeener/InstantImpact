@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 
 from app.config import get_settings
 from app.services.storage import get_layout, resolve_under_root
+from instantimpact_common.flux_inventory import inspect_flux_still
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -25,6 +26,24 @@ async def _comfy_health(url: str) -> bool:
     from instantimpact_comfy.client import ComfyClient
 
     return await ComfyClient(url).health()
+
+
+async def _comfy_object_info(url: str) -> dict | None:
+    from instantimpact_comfy.client import ComfyClient
+
+    try:
+        return await ComfyClient(url, timeout=15.0).object_info()
+    except Exception:
+        return None
+
+
+def _flux_report(*, comfy_healthy: bool | None, object_info: dict | None) -> dict:
+    settings = get_settings()
+    return inspect_flux_still(
+        settings.flux_runtime(),
+        object_info=object_info,
+        comfy_reachable=comfy_healthy,
+    )
 
 
 async def _gpu_holder(url: str) -> str | None:
@@ -68,10 +87,17 @@ async def health():
 
     gpu_holder = await _gpu_holder(settings.redis_url) if redis_ok else None
 
+    object_info = None
+    if comfy_healthy is True and not settings.mock_generation:
+        object_info = await _comfy_object_info(settings.comfy_url)
+    flux_still = _flux_report(comfy_healthy=comfy_healthy, object_info=object_info)
+
     status = "ok"
     if settings.comfy_enabled and not settings.mock_generation and comfy_healthy is False:
         status = "degraded"
     if not redis_ok and not settings.mock_generation:
+        status = "degraded"
+    if flux_still.get("status") in {"missing_weights", "missing_nodes", "unreachable"}:
         status = "degraded"
 
     return {
@@ -100,6 +126,28 @@ async def health():
         "gpu_locked": bool(gpu_holder),
         "gpu_holder": gpu_holder,
         "toolkit_ready": _toolkit_ready(),
+        "pipelines": {"flux_still": flux_still.get("status"), "flux_still_detail": flux_still},
+    }
+
+
+@router.get("/models")
+async def models():
+    """Pinned still weights vs what is on disk under INSTANTIMPACT_COMFY_DIR."""
+    settings = get_settings()
+    comfy_healthy = None
+    object_info = None
+    if settings.comfy_enabled:
+        comfy_healthy = await _comfy_health(settings.comfy_url)
+        if comfy_healthy:
+            object_info = await _comfy_object_info(settings.comfy_url)
+    report = _flux_report(comfy_healthy=comfy_healthy, object_info=object_info)
+    from instantimpact_common.model_pins import PROFILE_ENV, PROFILES
+
+    return {
+        "profiles": PROFILES,
+        "profile_env": PROFILE_ENV,
+        "bootstrap": "python scripts/bootstrap_models.py --profile krea --i-accept-licenses",
+        "pipeline": report,
     }
 
 

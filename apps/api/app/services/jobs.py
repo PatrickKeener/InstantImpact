@@ -213,6 +213,24 @@ async def _enqueue(
     if not safety.ok:
         raise JobServiceError("; ".join(safety.reasons))
 
+    mock = (
+        settings.mock_generation or not settings.comfy_enabled
+        if force_mock is None
+        else force_mock
+    )
+    if not mock:
+        from instantimpact_common.flux_inventory import (
+            fail_closed_message,
+            inspect_flux_still,
+            stills_require_pipeline,
+        )
+
+        if stills_require_pipeline(job_type):
+            report = inspect_flux_still(settings.flux_runtime(), comfy_reachable=True)
+            blocked = fail_closed_message(report)
+            if blocked:
+                raise JobServiceError(blocked, 503)
+
     # Assign seeds (keep any seed already set, e.g. regenerate)
     base_seed = random.randint(1, 2**31 - 1)
     for i, u in enumerate(units):
@@ -246,11 +264,7 @@ async def _enqueue(
         age_appearance_min=c.age_appearance_min,
         items=units,
         resume_on_item_failure=True,
-        mock=(
-            settings.mock_generation or not settings.comfy_enabled
-            if force_mock is None
-            else force_mock
-        ),
+        mock=mock,
         meta={"aspect_ratio": aspect_ratio, "seed_policy": seed_policy, **(extra_meta or {})},
     )
     request_path = layout.job_request_path(job_id)
@@ -478,6 +492,7 @@ async def enqueue_lora_train(
             "dest_rel": str(dest.relative_to(layout.root)).replace("\\", "/"),
             "run_name": run_name,
             "trigger_word": trigger,
+            "linear": int(settings.lora_dim),
             "toolkit_dir": str(toolkit),
             "auto_register": True,
             "slug": c.slug,
@@ -960,6 +975,7 @@ async def run_mock_job(db: AsyncSession, job_id: str) -> None:
             paste_product_corner,
             product_meta_from_item,
             resolve_product_image,
+            shot_meta_from_item,
         )
 
         pref = resolve_product_image(layout.root, req)
@@ -990,6 +1006,7 @@ async def run_mock_job(db: AsyncSession, job_id: str) -> None:
             "job_id": job_id,
             "seed": seed,
             "pipeline": "mock" if settings.mock_generation else "flux",
+            **shot_meta_from_item(req),
             **product_meta_from_item(req),
         }
         write_json(path.with_suffix(".disclosure.json"), disclosure)

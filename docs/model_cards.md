@@ -4,13 +4,20 @@
 
 | ID | Role | Source | Approx size | License | SHA-256 | Status |
 |----|------|--------|-------------|---------|---------|--------|
-| `flux1-dev-fp8` | Flux still base (Comfy checkpoint) | [Comfy-Org/flux1-dev](https://huggingface.co/Comfy-Org/flux1-dev) `flux1-dev-fp8.safetensors` | ~17 GB | BFL / see HF card | operator verify | **pinned for nemesis MVP** |
+| `flux1-dev-fp8` | Flux still base (packed checkpoint) | [Comfy-Org/flux1-dev](https://huggingface.co/Comfy-Org/flux1-dev) `flux1-dev-fp8.safetensors` | ~17 GB | BFL / see HF card | operator verify | rollback (`--profile fp8`) |
+| `flux1-dev-bf16` | Flux.1-dev UNET (split) | [black-forest-labs/FLUX.1-dev](https://huggingface.co/black-forest-labs/FLUX.1-dev) `flux1-dev.safetensors` | 23.8 GB | BFL non-commercial | operator verify | `--profile bf16` |
+| `flux1-krea-dev` | Photoreal Flux UNET (split) | [black-forest-labs/FLUX.1-Krea-dev](https://huggingface.co/black-forest-labs/FLUX.1-Krea-dev) `flux1-krea-dev.safetensors` | 23.8 GB | BFL non-commercial | operator verify | **recommended** (`--profile krea`) |
+| `clip-l` / `t5xxl-fp16` / `ae` | Flux text encoders + VAE | [comfyanonymous/flux_text_encoders](https://huggingface.co/comfyanonymous/flux_text_encoders) + BFL `ae.safetensors` | ~10.4 GB | mixed | operator verify | required with split loader |
 | `character_lora` | Per-character | Local train (AI Toolkit) | ~50–300 MB | derivative | per train | per character |
-| `pulid_flux` / `ipadapter_flux` | Identity lock | TBD pin | varies | Check source | TBD | post bootstrap |
+| `pulid_flux` | Flux identity adapter | [ByteDance PuLID-FLUX](https://huggingface.co/guozinan/PuLID) `pulid_flux_v0.9.1.safetensors` | ~1 GB | see HF card | operator verify | optional; Studio / `INSTANTIMPACT_PULID_MODEL` |
+| `upscale_model` | Pixel hi-res | e.g. `4x-UltraSharp.pth` in Comfy `models/upscale_models` | ~50–100 MB | see source | operator verify | optional; lanczos if unset |
 
-**Comfy path:** place checkpoint in `ComfyUI/models/checkpoints/`. App setting: `INSTANTIMPACT_COMFY_CKPT_NAME=flux1-dev-fp8.safetensors`. Workflow: `workflows/flux_still_character_v1.json`.
+**Bootstrap (setup, networked):** `python scripts/bootstrap_models.py --profile krea --i-accept-licenses`  
+Requires `INSTANTIMPACT_COMFY_DIR` and, for gated BFL files, `INSTANTIMPACT_HF_TOKEN` after you accept the license on Hugging Face.
 
-Phased still-quality work (CFG, CLIP-L, checkpoint swap, detail LoRA): [`docs/quality-phases.md`](quality-phases.md).
+**Comfy path (split / Krea):** UNET in `models/diffusion_models/`, CLIP/T5 in `models/clip/` or `models/text_encoders/`, VAE in `models/vae/`. Packed FP8 rollback still uses `models/checkpoints/`.
+
+Phased still-quality work (CFG, CLIP-L, checkpoint swap, detail LoRA, pixel hi-res, PuLID): [`docs/quality-phases.md`](quality-phases.md).
 
 ## Swapping the still base checkpoint
 

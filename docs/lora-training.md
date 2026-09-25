@@ -48,7 +48,7 @@ cd /home/pkeener/InstantImpact/apps/worker
 | Setting | Value |
 |---------|--------|
 | Base | Flux (`black-forest-labs/FLUX.1-dev`) |
-| Network | LoRA dim 16, alpha 16 |
+| Network | LoRA dim 32, alpha 32 |
 | Steps | 1500 (UI 200–4000) |
 | LR | 1e-4 |
 | Res | 512 / 768 / 1024 |

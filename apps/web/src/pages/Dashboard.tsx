@@ -66,6 +66,23 @@ bash scripts/ii comfy --stop-vllm`}
         </div>
       )}
 
+      {health?.pipelines?.flux_still === "missing_weights" && (
+        <div className="card border-amber-500/30 bg-amber-950/30 p-4 text-sm text-amber-100">
+          Flux still weights are missing
+          {health.pipelines.flux_still_detail?.missing_weights?.length
+            ? `: ${health.pipelines.flux_still_detail.missing_weights.join(", ")}`
+            : "."}{" "}
+          Photoreal path on the L40S:
+          <pre className="mt-2 overflow-x-auto rounded-lg bg-black/30 p-3 text-xs text-amber-50">
+            {`python scripts/bootstrap_models.py --profile krea --i-accept-licenses
+# then set INSTANTIMPACT_COMFY_LOADER=split
+# INSTANTIMPACT_COMFY_UNET_NAME=flux1-krea-dev.safetensors
+# INSTANTIMPACT_TRAIN_BASE_MODEL=black-forest-labs/FLUX.1-Krea-dev`}
+          </pre>
+          Retrain character LoRAs after the swap. Stills will not enqueue until the files are present.
+        </div>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="card p-5">
           <div className="text-xs uppercase tracking-wide text-slate-500">Health</div>
@@ -83,6 +100,7 @@ bash scripts/ii comfy --stop-vllm`}
           <div className="mt-1 text-xs text-slate-500">
             redis {health?.redis_ok ? "ok" : "down"} · comfy{" "}
             {health?.comfy_healthy === true ? "ok" : health?.comfy_healthy === false ? "down" : "n/a"}
+            {health?.pipelines?.flux_still ? ` · flux ${health.pipelines.flux_still}` : ""}
             {health?.disk_free_gb != null ? ` · ${health.disk_free_gb} GB free` : ""}
           </div>
         </div>

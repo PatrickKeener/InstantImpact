@@ -21,6 +21,8 @@ def test_yaml_includes_trigger_and_paths():
     assert "is_flux: true" in y
     assert "/data/characters/x/versions/v001/dataset" in y
     assert "steps: 1500" in y
+    assert "linear: 32" in y
+    assert "linear_alpha: 32" in y
     assert "guidance_scale: 2.5" in y
     assert "sample_steps: 28" in y
 

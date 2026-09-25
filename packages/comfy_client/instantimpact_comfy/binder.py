@@ -103,6 +103,40 @@ def bypass_node(
     return rewire(pruned)
 
 
+def drop_nodes(workflow: dict[str, Any], node_ids: tuple[str, ...] | set[str]) -> dict[str, Any]:
+    """Remove nodes by id. Callers must rewire consumers first when needed."""
+    drop = set(node_ids)
+    return {k: v for k, v in workflow.items() if k not in drop}
+
+
+def drop_hires_subgraph(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Skip pixel refine: the final VAEDecode reads the base sampler latent."""
+    wf = copy.deepcopy(workflow)
+    decode = wf.get(FINAL_DECODE_NODE_ID)
+    if isinstance(decode, dict):
+        inputs = dict(decode.get("inputs") or {})
+        inputs["samples"] = [BASE_SAMPLER_NODE_ID, 0]
+        decode["inputs"] = inputs
+    return drop_nodes(wf, HIRES_PIXEL_NODE_IDS)
+
+
+def drop_upscale_model(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Lanczos ImageScale from the decoded base image; no ESRGAN weights."""
+    wf = copy.deepcopy(workflow)
+    scale = wf.get(IMAGE_SCALE_NODE_ID)
+    if isinstance(scale, dict):
+        inputs = dict(scale.get("inputs") or {})
+        inputs["image"] = [HIRES_DECODE_NODE_ID, 0]
+        scale["inputs"] = inputs
+    return drop_nodes(wf, UPSCALE_MODEL_NODE_IDS)
+
+
+def drop_pulid(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Identity adapter off: samplers take the LoRA/checkpoint model."""
+    wf = bypass_node(workflow, PULID_APPLY_NODE_ID, PULID_OUTPUTS)
+    return drop_nodes(wf, PULID_SUPPORT_NODE_IDS)
+
+
 # Required keys for flux_still_character_v1 (CheckpointLoaderSimple / FP8 path)
 FLUX_STILL_REQUIRED_VARS = {
     "CKPT_NAME",
@@ -150,11 +184,17 @@ DETAIL_LORA_NODE_ID = "12"
 DETAIL_LORA_OUTPUTS = {0: "model", 1: "clip"}
 DETAIL_LORA_VARS = {"DETAIL_LORA_NAME", "DETAIL_LORA_STRENGTH"}
 
-# Optional hi-res refinement: upscale the latent, then resample at low denoise so
-# small details get regenerated with more pixels to work with. Bypass order
-# matters — drop the sampler first so the decode falls back through the upscale
-# to the base sampler.
-HIRES_BYPASS_ORDER = (("14", {0: "latent_image"}), ("13", {0: "samples"}))
+# Optional hi-res refinement in pixel space: decode the base latent, optionally
+# run an upscale model, lanczos to the target size, encode, then a low-denoise
+# sampler. Mixed IMAGE/LATENT types mean bypass_node cannot walk this chain.
+FINAL_DECODE_NODE_ID = "8"
+BASE_SAMPLER_NODE_ID = "3"
+HIRES_DECODE_NODE_ID = "15"
+IMAGE_SCALE_NODE_ID = "18"
+HIRES_SAMPLER_NODE_ID = "14"
+HIRES_PIXEL_NODE_IDS = ("14", "15", "16", "17", "18", "19")
+UPSCALE_MODEL_NODE_IDS = ("16", "17")
+UPSCALE_MODEL_VARS = {"UPSCALE_MODEL_NAME"}
 HIRES_VARS = {
     "HIRES_WIDTH",
     "HIRES_HEIGHT",
@@ -163,4 +203,18 @@ HIRES_VARS = {
     # above ~1024px than they do at base resolution.
     "HIRES_SAMPLER_NAME",
     "HIRES_SCHEDULER",
+}
+
+# Optional PuLID-Flux identity lock. ApplyPulidFlux patches MODEL after the
+# detail LoRA; both samplers read that patched model. Support nodes (loaders +
+# face image) have no passthrough, so they are dropped after the apply node is
+# bypassed.
+PULID_APPLY_NODE_ID = "34"
+PULID_OUTPUTS = {0: "model"}
+PULID_SUPPORT_NODE_IDS = ("30", "31", "32", "33")
+PULID_VARS = {
+    "PULID_MODEL_NAME",
+    "PULID_STRENGTH",
+    "PULID_PROVIDER",
+    "FACE_REF_IMAGE",
 }

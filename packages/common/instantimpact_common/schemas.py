@@ -94,12 +94,14 @@ class FluxPipelineParams(BaseModel):
     # reliable way to get correct bare-chest anatomy.
     detail_lora_name: str | None = None
     detail_lora_strength: float = 0.6
-    # Second low-denoise pass at higher resolution. Small features (nipples,
-    # jewellery, fabric weave) only resolve to a handful of latent pixels at
-    # base size, so this is what recovers them. Roughly doubles time per still.
+    # Second low-denoise pass at higher resolution in pixel space (decode,
+    # optional upscale model, lanczos to target, encode). Small features only
+    # occupy a handful of latent pixels at base size. Roughly doubles time.
     hires_fix: bool = True
     hires_scale: float = 1.5
     hires_denoise: float = 0.4
+    # Filename in ComfyUI/models/upscale_models. Empty = lanczos ImageScale only.
+    upscale_model_name: str | None = None
     # Sampler is per-checkpoint, not universal. Stock Flux.1-dev is happy with
     # euler/simple throughout; several Flux finetunes recommend a different
     # pairing above ~1024px, which is exactly where the hi-res pass runs.
@@ -109,6 +111,8 @@ class FluxPipelineParams(BaseModel):
     hires_scheduler: str = "simple"
     ip_adapter_strength: float = 0.6
     pulid_strength: float = 0.7
+    # Filename in ComfyUI/models/pulid. Empty = PuLID subgraph is dropped.
+    pulid_model_name: str | None = None
     # Distilled Flux.1-dev must stay at cfg 1.0 (negatives are inert).
     # De-distilled Flux-arch finetunes should use ~3–4 so NEGATIVE_PROMPT bites.
     steps: int = 28

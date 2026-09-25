@@ -138,6 +138,29 @@ async def _unload_comfy() -> None:
         await ComfyClient(comfy_url, timeout=30.0).free_memory(unload_models=True)
 
 
+def _face_ref_path(refs: Path | None) -> Path | None:
+    """Prefer a named face still from the generate-only ref pack."""
+    if not refs or not refs.is_dir():
+        return None
+    preferred = (
+        "face_primary.png",
+        "face_primary.jpg",
+        "face_primary.webp",
+        "face_alt_01.png",
+        "face_alt_01.jpg",
+    )
+    for name in preferred:
+        candidate = refs / name
+        if candidate.is_file():
+            return candidate
+    images = sorted(
+        p
+        for p in refs.iterdir()
+        if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+    )
+    return images[0] if images else None
+
+
 def _refs_dir(snapshot: dict, data_dir: Path) -> Path | None:
     raw = snapshot.get("ref_pack_path")
     if not raw:
@@ -231,6 +254,7 @@ async def _run_mock(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             paste_product_corner,
             product_meta_from_item,
             resolve_product_image,
+            shot_meta_from_item,
         )
 
         pref = resolve_product_image(data_dir, item)
@@ -256,6 +280,7 @@ async def _run_mock(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             "job_id": job_id,
             "seed": seed,
             "pipeline": "mock",
+            **shot_meta_from_item(item),
             **product_meta_from_item(item),
         }
         still_path.with_suffix(".disclosure.json").write_text(
@@ -298,10 +323,14 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         FLUX_STILL_REQUIRED_VARS,
         FLUX_STILL_SPLIT_LORA_REQUIRED_VARS,
         FLUX_STILL_SPLIT_REQUIRED_VARS,
-        HIRES_BYPASS_ORDER,
         HIRES_VARS,
+        PULID_VARS,
+        UPSCALE_MODEL_VARS,
         bind_workflow,
         bypass_node,
+        drop_hires_subgraph,
+        drop_pulid,
+        drop_upscale_model,
         load_workflow,
         nodes_only,
         validate_placeholders,
@@ -349,6 +378,20 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     scheduler = str(flux_params.get("scheduler") or "simple")
     hires_sampler_name = str(flux_params.get("hires_sampler_name") or sampler_name)
     hires_scheduler = str(flux_params.get("hires_scheduler") or scheduler)
+    upscale_model_name = _optional_str(
+        flux_params.get("upscale_model_name"),
+        os.environ.get("INSTANTIMPACT_COMFY_UPSCALE_MODEL"),
+    )
+    pulid_model_name = _optional_str(
+        flux_params.get("pulid_model_name"),
+        os.environ.get("INSTANTIMPACT_PULID_MODEL"),
+    )
+    pulid_strength = float(
+        flux_params.get("pulid_strength") if flux_params.get("pulid_strength") is not None else 0.7
+    )
+    pulid_provider = (
+        _optional_str(os.environ.get("INSTANTIMPACT_PULID_PROVIDER")) or "CUDA"
+    )
     if not lora_name and snapshot.get("lora_path"):
         lp = str(snapshot["lora_path"])
         if lp.endswith(".safetensors"):
@@ -416,11 +459,20 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         required = required | DETAIL_LORA_VARS
     else:
         template = bypass_node(template, DETAIL_LORA_NODE_ID, DETAIL_LORA_OUTPUTS)
+    face_ref = _face_ref_path(refs)
+    use_pulid = bool(pulid_model_name and face_ref and pulid_strength > 0)
+    if use_pulid:
+        required = required | PULID_VARS
+    else:
+        template = drop_pulid(template)
     if hires_fix:
         required = required | HIRES_VARS
+        if upscale_model_name:
+            required = required | UPSCALE_MODEL_VARS
+        else:
+            template = drop_upscale_model(template)
     else:
-        for node_id, outputs in HIRES_BYPASS_ORDER:
-            template = bypass_node(template, node_id, outputs)
+        template = drop_hires_subgraph(template)
     errors = validate_placeholders(template, required)
     if errors:
         await _publish(
@@ -448,6 +500,26 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             },
         )
         return {"ok": False}
+
+    face_ref_image = None
+    if use_pulid:
+        assert face_ref is not None
+        try:
+            face_ref_image = await client.upload_image(
+                face_ref.read_bytes(),
+                f"ii_pulid_{job_id[:8]}{face_ref.suffix.lower() or '.png'}",
+            )
+        except Exception as exc:
+            await _publish(
+                redis,
+                {
+                    "job_id": job_id,
+                    "event": "failed",
+                    "error_code": "pulid_ref_upload_failed",
+                    "message": f"Could not upload face ref for PuLID: {exc}",
+                },
+            )
+            return {"ok": False}
 
     default_steps = int(flux_params.get("steps") or 28)
     # Distilled Flux.1-dev: keep cfg 1.0. De-distilled bases: raise pipeline cfg.
@@ -535,6 +607,13 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             variables["HIRES_DENOISE"] = hires_denoise
             variables["HIRES_SAMPLER_NAME"] = hires_sampler_name
             variables["HIRES_SCHEDULER"] = hires_scheduler
+            if upscale_model_name:
+                variables["UPSCALE_MODEL_NAME"] = upscale_model_name
+        if use_pulid:
+            variables["PULID_MODEL_NAME"] = pulid_model_name
+            variables["PULID_STRENGTH"] = pulid_strength
+            variables["PULID_PROVIDER"] = pulid_provider
+            variables["FACE_REF_IMAGE"] = face_ref_image
 
         try:
             bound = bind_workflow(template, variables)
@@ -572,7 +651,10 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             rel_still = str(still_path.relative_to(data_dir)).replace("\\", "/")
             rel_thumb = str(thumb_path.relative_to(data_dir)).replace("\\", "/")
 
-            from instantimpact_common.product_media import product_meta_from_item
+            from instantimpact_common.product_media import (
+                product_meta_from_item,
+                shot_meta_from_item,
+            )
 
             disclosure = {
                 "synthetic": True,
@@ -591,8 +673,13 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
                 "lora_clip_strength": lora_clip_strength if use_lora else None,
                 "detail_lora_name": detail_lora_name,
                 "detail_lora_strength": detail_lora_strength if detail_lora_name else None,
+                "hires_fix": hires_fix,
+                "upscale_model_name": upscale_model_name if hires_fix else None,
+                "pulid_model_name": pulid_model_name if use_pulid else None,
+                "pulid_strength": pulid_strength if use_pulid else None,
                 "clip_l_prompt": clip_l,
                 "ref_pack": str(refs) if refs else None,
+                **shot_meta_from_item(item),
                 **product_meta_from_item(item),
             }
             still_path.with_suffix(".disclosure.json").write_text(

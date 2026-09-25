@@ -10,6 +10,7 @@ Full architecture, consistency strategy, and PR plan:
 
 - [`docs/design-instantimpact.md`](docs/design-instantimpact.md)
 - [`docs/quality-phases.md`](docs/quality-phases.md) — still quality rollout (checkpoint, CFG, LoRAs)
+- Photoreal Flux: `python scripts/bootstrap_models.py --profile krea --i-accept-licenses`
 
 ## Frozen MVP
 

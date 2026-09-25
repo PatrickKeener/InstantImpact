@@ -186,6 +186,16 @@ export type ProductPlacement = {
   prompt: string;
 };
 
+export type FluxStillDetail = {
+  status?: string;
+  loader?: string;
+  unet?: string;
+  missing_weights?: string[];
+  missing_nodes?: string[];
+  optional_missing?: string[];
+  unverified?: boolean;
+};
+
 export type Health = {
   status: string;
   mvp?: Record<string, unknown>;
@@ -196,6 +206,10 @@ export type Health = {
   disk_free_gb?: number | null;
   auth_required?: boolean;
   mock_generation?: boolean;
+  pipelines?: {
+    flux_still?: string;
+    flux_still_detail?: FluxStillDetail;
+  };
 };
 
 export type GpuStatus = {

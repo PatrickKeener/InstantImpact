@@ -106,10 +106,10 @@ def render_flux_lora_yaml(
     training_folder: str,
     steps: int = 1500,
     lr: str = "1e-4",
-    linear: int = 16,
+    linear: int = 32,
     base_model: str | None = None,
 ) -> str:
-    """AI Toolkit extension job YAML, matching the Sienna/nemesis Flux LoRA recipe."""
+    """AI Toolkit extension job YAML. Dim 32 holds face+body better than dim 16."""
     name = _yaml_escape(name)
     trigger = _yaml_escape(trigger_word)
     dataset = _yaml_escape(dataset_dir.replace("\\", "/"))
