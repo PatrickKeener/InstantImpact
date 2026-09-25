@@ -53,6 +53,7 @@ def test_random_character_palettes_stay_coherent():
     for seed in range(60):
         p = build_random_character_create(seed=seed, auto_attest=False)
         palette = next(x for x in _PALETTES if x["ethnicity"] == p.appearance.ethnicity_hint)
+        assert p.appearance.ethnicity_hint == palette["ethnicity"]
         assert p.appearance.skin_tone in palette["skin"]
         assert p.appearance.hair_color in palette["hair"]
         assert p.appearance.eye_color in palette["eyes"]
@@ -64,6 +65,15 @@ def test_random_character_palettes_stay_coherent():
             assert "petite" in (p.appearance.height_hint or "")
         if "tall lean" in p.appearance.body_type:
             assert "tall" in (p.appearance.height_hint or "")
+
+
+def test_random_character_names_one_ancestry_not_mixed():
+    for seed in range(30):
+        p = build_random_character_create(seed=seed, auto_attest=False)
+        eth = (p.appearance.ethnicity_hint or "").lower()
+        assert "mixed heritage" not in eth
+        assert "woman" in eth
+        assert "facial structure" in eth
 
 
 def test_random_character_does_not_force_nude_wardrobe_every_time():

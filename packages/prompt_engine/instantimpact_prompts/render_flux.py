@@ -29,10 +29,9 @@ def render_flux_encoder_prompts(
 ) -> tuple[str, str, str]:
     """Return (clip_l, t5, negative) for Flux's dual text encoders.
 
-    CLIP-L is capped at ~77 tokens. It gets shot intent, then compact
-    appearance (hair/eyes/body), then location/product/extra so identity is
-    not pushed off the window by a long commercial clause. T5 gets the full
-    prompt including style, notes, and the quality stack.
+    CLIP-L is capped at ~77 tokens. It gets photo + adult + race/face lock,
+    then scene/outfit, then remaining appearance, then location/product.
+    T5 gets the full prompt including style, notes, and the quality stack.
     """
     if isinstance(contract, dict):
         contract = PromptContract.model_validate(contract)
@@ -43,10 +42,15 @@ def render_flux_encoder_prompts(
     exposure = outfit or ", ".join(wardrobe_tokens)
     revealing = _contains_any(exposure, _REVEALING_MARKERS)
 
-    # Lead with photo intent — Flux weights early tokens heavily.
-    # Shot-specific instructions must precede detailed identity on T5 so both
-    # encoders receive the requested scene and wardrobe.
-    shot_head: list[str] = ["photorealistic photograph", *contract.subject_tokens, scene]
+    # Lead with photo intent, then a short race/face lock. Flux weights early
+    # tokens; if ethnicity sits after the theme, seed galleries resample race.
+    lock = [t for t in contract.identity_lock_tokens if t and t.strip()]
+    shot_head: list[str] = [
+        "photorealistic photograph",
+        *contract.subject_tokens,
+        *lock,
+        scene,
+    ]
     if outfit:
         # Avoid "wearing nude" awkwardness; pass outfit as-is if it already describes state
         if outfit.lower().startswith(_OUTFIT_STATE_PREFIXES):

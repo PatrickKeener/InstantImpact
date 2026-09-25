@@ -117,10 +117,11 @@ def test_shot_intent_outranks_character_defaults():
     assert "window light" not in pos
     # The "as well as clothed" hedge would undo an explicit nude outfit
     assert "clothed" not in pos
-    # Scene and outfit land ahead of the character's style defaults
+    # Scene and outfit land ahead of the character's style defaults.
+    # Hair/ethnicity may precede the scene — that lock stops race drift.
     assert pos.index("clearly outdoors") < pos.index("glamour photography")
     assert pos.index("naked with see through dress") < pos.index("glamour photography")
-    assert pos.index("clearly outdoors") < pos.index("auburn")
+    assert pos.index("auburn") < pos.index("glamour photography")
 
 
 def test_clip_l_keeps_shot_and_drops_character_quality_stack():
@@ -151,6 +152,27 @@ def test_clip_l_keeps_shot_and_drops_character_quality_stack():
     assert clip_l.index("auburn") < clip_l.index("sunlit meadow")
     assert "natural pores" in t5.lower() or "skin texture" in t5.lower()
     assert "sunlit meadow" in t5
+
+
+def test_clip_l_locks_race_before_theme():
+    from instantimpact_prompts.render_flux import render_flux_encoder_prompts
+
+    contract = build_prompt_contract(
+        appearance=AppearanceProfile(
+            ethnicity_hint="East Asian features",
+            skin_tone="light East Asian skin",
+            hair_color="jet black",
+            eye_color="dark brown",
+            body_type="athletic",
+        ),
+        boundaries=BoundariesProfile(),
+        trigger_word="sks_mei_v1",
+    )
+    clip_l, t5, _ = render_flux_encoder_prompts(contract, theme="glamour")
+    assert "East Asian woman" in clip_l
+    assert clip_l.index("East Asian woman") < clip_l.index("editorial")
+    assert t5.index("East Asian woman") < t5.index("editorial")
+    assert t5.index("jet black") < t5.index("athletic")
 
 
 def test_clip_l_puts_identity_before_product_clause():

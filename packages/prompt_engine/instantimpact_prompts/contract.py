@@ -15,6 +15,51 @@ from instantimpact_common.schemas import (
 )
 
 
+# Older profiles stored weak "X features" hints. Flux treats those as optional
+# and resamples race per seed. Expand them into an explicit woman + structure.
+_ETHNICITY_LOCK = {
+    "northern european features": "white Northern European woman, Northern European facial structure",
+    "slavic features": "white Slavic woman, Slavic facial structure",
+    "mediterranean features": "white Mediterranean woman, Mediterranean facial structure",
+    "east asian features": "East Asian woman, East Asian facial structure",
+    "south asian features": "South Asian woman, South Asian facial structure",
+    "latina features": "Latina woman, Latin American facial structure",
+    "middle eastern features": "Middle Eastern woman, Middle Eastern facial structure",
+    "west african features": "Black woman, West African facial structure",
+    "southeast asian features": "Southeast Asian woman, Southeast Asian facial structure",
+    "mixed heritage features": "mixed-race woman, one consistent mixed facial structure",
+}
+
+
+def _lock_ethnicity(hint: str) -> str:
+    key = hint.strip().lower()
+    return _ETHNICITY_LOCK.get(key, hint.strip())
+
+
+def _identity_lock_tokens(appearance: AppearanceProfile) -> list[str]:
+    """Short race/face lock. Must stay at the front of both encoders."""
+    tokens: list[str] = []
+    if appearance.ethnicity_hint:
+        tokens.append(_lock_ethnicity(str(appearance.ethnicity_hint)))
+    if appearance.skin_tone:
+        tokens.append(str(appearance.skin_tone).strip())
+    hair_parts = [
+        str(value).strip()
+        for value in (appearance.hair_length, appearance.hair_color)
+        if value
+    ]
+    if hair_parts:
+        hair = " ".join(hair_parts)
+        tokens.append(hair if "hair" in hair.lower() else f"{hair} hair")
+    elif appearance.hair_color:
+        color = str(appearance.hair_color).strip()
+        tokens.append(color if "hair" in color.lower() else f"{color} hair")
+    if appearance.eye_color:
+        color = str(appearance.eye_color).strip()
+        tokens.append(color if "eye" in color.lower() else f"{color} eyes")
+    return tokens
+
+
 def build_prompt_contract(
     *,
     appearance: AppearanceProfile | dict,
@@ -27,37 +72,23 @@ def build_prompt_contract(
     if isinstance(boundaries, dict):
         boundaries = BoundariesProfile.model_validate(boundaries)
 
+    identity_lock = _identity_lock_tokens(appearance)
+
     appearance_tokens: list[str] = []
+    appearance_tokens.extend(identity_lock)
     for field in (
-        appearance.skin_tone,
         appearance.face_shape,
         appearance.body_type,
         appearance.height_hint,
         appearance.makeup_style,
-        appearance.ethnicity_hint,
     ):
         if field:
             appearance_tokens.append(str(field).strip())
-
-    eye_parts = [
-        str(value).strip() for value in (appearance.eye_color, appearance.eye_shape) if value
-    ]
-    if eye_parts:
-        eyes = " ".join(eye_parts)
-        appearance_tokens.append(eyes if "eye" in eyes.lower() else f"{eyes} eyes")
-
-    hair_parts = [
-        str(value).strip() for value in (appearance.hair_length, appearance.hair_color) if value
-    ]
-    if hair_parts:
-        hair = " ".join(hair_parts)
-        hair = hair if "hair" in hair.lower() else f"{hair} hair"
-        if appearance.hair_style:
-            hair = f"{hair} styled in {str(appearance.hair_style).strip()}"
-        appearance_tokens.append(hair)
-    elif appearance.hair_style:
+    if appearance.eye_shape:
+        shape = str(appearance.eye_shape).strip()
+        appearance_tokens.append(shape if "eye" in shape.lower() else f"{shape} eyes")
+    if appearance.hair_style:
         appearance_tokens.append(f"hair styled in {str(appearance.hair_style).strip()}")
-
     appearance_tokens.extend(f.strip() for f in appearance.distinguishing_features if f.strip())
     style_tokens = [s.strip() for s in appearance.style_keywords if s.strip()]
     wardrobe_tokens = [w.strip() for w in appearance.typical_wardrobe if w.strip()]
@@ -102,6 +133,7 @@ def build_prompt_contract(
 
     return PromptContract(
         subject_tokens=subject_tokens,
+        identity_lock_tokens=identity_lock,
         appearance_tokens=appearance_tokens,
         style_tokens=style_tokens,
         wardrobe_tokens=wardrobe_tokens,

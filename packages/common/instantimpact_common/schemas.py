@@ -150,6 +150,9 @@ class PromptContract(BaseModel):
     """Structured contract stored on character_versions; renderers produce strings."""
 
     subject_tokens: list[str] = Field(default_factory=list)
+    # Ethnicity, skin, hair, eyes — rendered immediately after the adult/trigger
+    # tokens so Flux does not resample race every seed.
+    identity_lock_tokens: list[str] = Field(default_factory=list)
     appearance_tokens: list[str] = Field(default_factory=list)
     style_tokens: list[str] = Field(default_factory=list)
     wardrobe_tokens: list[str] = Field(default_factory=list)

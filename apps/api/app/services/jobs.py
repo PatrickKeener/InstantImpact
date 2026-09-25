@@ -247,6 +247,16 @@ async def _enqueue(
     job_dir = layout.job_dir(job_id)
     job_dir.mkdir(parents=True, exist_ok=True)
 
+    from instantimpact_prompts.contract import build_prompt_contract
+
+    # Rebuild at enqueue so prompt-engine identity locks apply without
+    # re-saving the character (old versions stored weak "X features" hints).
+    prompt_contract = build_prompt_contract(
+        appearance=version.appearance_json or {},
+        boundaries=version.boundaries_json or {},
+        trigger_word=version.trigger_word,
+    ).model_dump()
+
     snapshot = JobRequestSnapshot(
         job_id=job_id,
         type=job_type,
@@ -257,7 +267,7 @@ async def _enqueue(
         trigger_word=version.trigger_word,
         lora_path=version.lora_path,
         ref_pack_path=version.ref_pack_path,
-        prompt_contract=version.prompt_contract_json or {},
+        prompt_contract=prompt_contract,
         pipeline_params=version.pipeline_params_json or {},
         boundaries=version.boundaries_json or {},
         appearance=version.appearance_json or {},

@@ -27,11 +27,7 @@ _FIRST_NAMES = [
     "Jasmine", "Priya", "Aisha", "Mei", "Hana", "Yara", "Ines", "Clara", "Dahlia", "Wren",
     "Leila", "Noor", "Sable", "Marlowe", "Indira", "Kira",
 ]
-_SURNAMES = [
-    "Vale", "Hart", "Keene", "Solis", "Ivers", "Maren", "Nadir", "Quinn", "Lane",
-    "Shaw", "Voss", "Reed", "Cole", "West", "Brooks", "Hale", "Nyx", "Sato",
-    "Rahman", "Okoye", "Diaz", "Kaur", "Nguyen", "Berg", "Costa", "Alvarez",
-]
+
 
 
 class AncestryPalette(TypedDict):
@@ -39,70 +35,75 @@ class AncestryPalette(TypedDict):
     skin: list[str]
     hair: list[str]
     eyes: list[str]
+    surnames: list[str]
 
 
-# Compatible skin / hair / eye sets. Sampling inside a palette keeps Flux from
-# fighting the prompt (e.g. West African features + porcelain + platinum).
+# One ancestry per character. Vague "features" / "mixed heritage" lets Flux
+# pick a different race on every seed. Name the woman, the structure, and a
+# tight skin/hair/eye set.
 _PALETTES: list[AncestryPalette] = [
     {
-        "ethnicity": "Northern European features",
+        "ethnicity": "white Northern European woman, Northern European facial structure",
         "skin": ["fair porcelain skin", "light skin with cool undertone", "light skin with warm undertone"],
-        "hair": ["platinum blonde", "honey blonde", "dirty blonde", "light brown", "chestnut brown", "auburn", "copper red"],
-        "eyes": ["blue", "green", "gray-blue", "hazel", "brown"],
+        "hair": ["platinum blonde", "honey blonde", "dirty blonde", "light brown", "chestnut brown", "auburn"],
+        "eyes": ["blue", "green", "gray-blue", "hazel"],
+        "surnames": ["Vale", "Hart", "Keene", "Ivers", "Berg", "Shaw", "Reed", "Hale"],
     },
     {
-        "ethnicity": "Mediterranean features",
-        "skin": ["olive skin", "medium olive skin", "golden tan skin", "light skin with warm undertone"],
-        "hair": ["dark brown", "chestnut brown", "jet black", "auburn"],
+        "ethnicity": "white Slavic woman, Slavic facial structure",
+        "skin": ["fair porcelain skin", "light skin with cool undertone"],
+        "hair": ["platinum blonde", "dirty blonde", "light brown", "dark brown"],
+        "eyes": ["blue", "gray-blue", "green"],
+        "surnames": ["Voss", "Maren", "Volkov", "Hale", "Keene"],
+    },
+    {
+        "ethnicity": "white Mediterranean woman, Mediterranean facial structure",
+        "skin": ["olive skin", "medium olive skin", "golden tan skin"],
+        "hair": ["dark brown", "chestnut brown", "jet black"],
         "eyes": ["brown", "hazel", "dark brown", "green"],
+        "surnames": ["Costa", "Romano", "Vale", "Cole"],
     },
     {
-        "ethnicity": "East Asian features",
-        "skin": ["fair light skin", "light skin with warm undertone", "light medium skin"],
-        "hair": ["jet black", "dark brown", "soft black with highlights"],
-        "eyes": ["dark brown", "brown", "hazel"],
-    },
-    {
-        "ethnicity": "South Asian features",
-        "skin": ["light brown skin", "medium brown skin", "golden tan skin"],
-        "hair": ["jet black", "dark brown", "soft black with highlights"],
-        "eyes": ["dark brown", "brown", "hazel", "amber"],
-    },
-    {
-        "ethnicity": "Latina features",
-        "skin": ["golden tan skin", "medium olive skin", "light brown skin", "warm medium skin"],
-        "hair": ["dark brown", "jet black", "chestnut brown", "soft black with highlights"],
-        "eyes": ["brown", "dark brown", "hazel", "amber"],
-    },
-    {
-        "ethnicity": "Middle Eastern features",
-        "skin": ["olive skin", "golden tan skin", "light brown skin", "medium olive skin"],
-        "hair": ["jet black", "dark brown", "chestnut brown"],
-        "eyes": ["dark brown", "brown", "hazel", "green"],
-    },
-    {
-        "ethnicity": "West African features",
-        "skin": ["deep brown skin", "rich dark skin", "dark brown skin"],
-        "hair": ["jet black", "dark brown", "soft black with highlights"],
-        "eyes": ["dark brown", "brown", "amber"],
-    },
-    {
-        "ethnicity": "Southeast Asian features",
-        "skin": ["golden tan skin", "light brown skin", "medium brown skin", "warm medium skin"],
+        "ethnicity": "East Asian woman, East Asian facial structure",
+        "skin": ["light East Asian skin", "light skin with warm undertone", "light medium East Asian skin"],
         "hair": ["jet black", "dark brown"],
         "eyes": ["dark brown", "brown"],
+        "surnames": ["Sato", "Nguyen", "Chen", "Park", "Hayashi"],
     },
     {
-        "ethnicity": "Slavic features",
-        "skin": ["fair porcelain skin", "light skin with cool undertone", "light skin with warm undertone"],
-        "hair": ["platinum blonde", "dirty blonde", "light brown", "chestnut brown", "dark brown"],
-        "eyes": ["blue", "gray-blue", "green", "hazel", "brown"],
+        "ethnicity": "South Asian woman, South Asian facial structure",
+        "skin": ["light brown South Asian skin", "medium brown South Asian skin", "warm brown skin"],
+        "hair": ["jet black", "dark brown"],
+        "eyes": ["dark brown", "brown"],
+        "surnames": ["Kaur", "Rahman", "Sharma", "Nair"],
     },
     {
-        "ethnicity": "mixed heritage features",
-        "skin": ["light brown skin", "golden tan skin", "medium olive skin", "warm medium skin"],
-        "hair": ["dark brown", "chestnut brown", "jet black", "auburn", "honey blonde"],
-        "eyes": ["hazel", "brown", "green", "amber", "dark brown"],
+        "ethnicity": "Latina woman, Latin American facial structure",
+        "skin": ["golden tan skin", "medium olive skin", "light brown skin"],
+        "hair": ["dark brown", "jet black", "chestnut brown"],
+        "eyes": ["brown", "dark brown", "hazel"],
+        "surnames": ["Diaz", "Solis", "Alvarez", "Rios", "Costa"],
+    },
+    {
+        "ethnicity": "Middle Eastern woman, Middle Eastern facial structure",
+        "skin": ["olive skin", "golden tan skin", "light brown olive skin"],
+        "hair": ["jet black", "dark brown"],
+        "eyes": ["dark brown", "brown", "hazel"],
+        "surnames": ["Nadir", "Rahman", "Hassan", "Farah"],
+    },
+    {
+        "ethnicity": "Black woman, West African facial structure",
+        "skin": ["deep brown skin", "rich dark skin", "dark brown skin"],
+        "hair": ["jet black", "dark brown"],
+        "eyes": ["dark brown", "brown"],
+        "surnames": ["Okoye", "Mensah", "Adeyemi", "Nwosu"],
+    },
+    {
+        "ethnicity": "Southeast Asian woman, Southeast Asian facial structure",
+        "skin": ["golden tan Southeast Asian skin", "light brown Southeast Asian skin", "medium brown skin"],
+        "hair": ["jet black", "dark brown"],
+        "eyes": ["dark brown", "brown"],
+        "surnames": ["Nguyen", "Santos", "Rahman", "Sari"],
     },
 ]
 
@@ -321,13 +322,13 @@ def build_random_character_create(
     rng = random.Random(seed)
 
     first = _pick(rng, _FIRST_NAMES)
-    last = _pick(rng, _SURNAMES)
+    palette = _pick(rng, _PALETTES)
+    last = _pick(rng, palette["surnames"])
     display_name = f"{first} {last}"
 
     band, age_lo, age_hi = _pick(rng, _AGE_BANDS)
     age_min = rng.randint(max(21, age_lo), age_hi)
 
-    palette = _pick(rng, _PALETTES)
     body = _pick(rng, _BODIES)
     hair_length = _pick(rng, list(_HAIR_BY_LENGTH))
     hair_style = _pick(rng, _HAIR_BY_LENGTH[hair_length])
