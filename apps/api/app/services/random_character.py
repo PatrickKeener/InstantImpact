@@ -1,9 +1,14 @@
-"""Curated random adult synthetic persona builder (no LLM required)."""
+"""Curated random adult synthetic persona builder (no LLM required).
+
+Traits are sampled from coherent palettes so hair, eyes, skin, and ancestry
+agree, and body/height/bust do not contradict. Independent rolls produced
+impossible combinations that Flux cannot hold across a seed gallery.
+"""
 
 from __future__ import annotations
 
 import random
-from typing import Any
+from typing import Any, TypedDict
 
 from app.schemas.characters import CharacterCreate
 from instantimpact_common.enums import AgeAppearanceBand
@@ -14,12 +19,219 @@ from instantimpact_common.schemas import (
     SpeakingStyle,
 )
 
-# First names only — generic, not celebrity-targeted
+# First + surname only — generic, not celebrity-targeted.
 _FIRST_NAMES = [
     "Ava", "Mia", "Nora", "Elena", "Sofia", "Isla", "Luna", "Chloe", "Zoe", "Maya",
     "Aria", "Layla", "Camila", "Riley", "Harper", "Nova", "Ivy", "Ruby", "Sienna", "Freya",
     "Amara", "Keira", "Tessa", "Nina", "Vera", "Iris", "Lydia", "Sloane", "Quinn", "Eden",
     "Jasmine", "Priya", "Aisha", "Mei", "Hana", "Yara", "Ines", "Clara", "Dahlia", "Wren",
+    "Leila", "Noor", "Sable", "Marlowe", "Indira", "Kira",
+]
+_SURNAMES = [
+    "Vale", "Hart", "Keene", "Solis", "Ivers", "Maren", "Nadir", "Quinn", "Lane",
+    "Shaw", "Voss", "Reed", "Cole", "West", "Brooks", "Hale", "Nyx", "Sato",
+    "Rahman", "Okoye", "Diaz", "Kaur", "Nguyen", "Berg", "Costa", "Alvarez",
+]
+
+
+class AncestryPalette(TypedDict):
+    ethnicity: str
+    skin: list[str]
+    hair: list[str]
+    eyes: list[str]
+
+
+# Compatible skin / hair / eye sets. Sampling inside a palette keeps Flux from
+# fighting the prompt (e.g. West African features + porcelain + platinum).
+_PALETTES: list[AncestryPalette] = [
+    {
+        "ethnicity": "Northern European features",
+        "skin": ["fair porcelain skin", "light skin with cool undertone", "light skin with warm undertone"],
+        "hair": ["platinum blonde", "honey blonde", "dirty blonde", "light brown", "chestnut brown", "auburn", "copper red"],
+        "eyes": ["blue", "green", "gray-blue", "hazel", "brown"],
+    },
+    {
+        "ethnicity": "Mediterranean features",
+        "skin": ["olive skin", "medium olive skin", "golden tan skin", "light skin with warm undertone"],
+        "hair": ["dark brown", "chestnut brown", "jet black", "auburn"],
+        "eyes": ["brown", "hazel", "dark brown", "green"],
+    },
+    {
+        "ethnicity": "East Asian features",
+        "skin": ["fair light skin", "light skin with warm undertone", "light medium skin"],
+        "hair": ["jet black", "dark brown", "soft black with highlights"],
+        "eyes": ["dark brown", "brown", "hazel"],
+    },
+    {
+        "ethnicity": "South Asian features",
+        "skin": ["light brown skin", "medium brown skin", "golden tan skin"],
+        "hair": ["jet black", "dark brown", "soft black with highlights"],
+        "eyes": ["dark brown", "brown", "hazel", "amber"],
+    },
+    {
+        "ethnicity": "Latina features",
+        "skin": ["golden tan skin", "medium olive skin", "light brown skin", "warm medium skin"],
+        "hair": ["dark brown", "jet black", "chestnut brown", "soft black with highlights"],
+        "eyes": ["brown", "dark brown", "hazel", "amber"],
+    },
+    {
+        "ethnicity": "Middle Eastern features",
+        "skin": ["olive skin", "golden tan skin", "light brown skin", "medium olive skin"],
+        "hair": ["jet black", "dark brown", "chestnut brown"],
+        "eyes": ["dark brown", "brown", "hazel", "green"],
+    },
+    {
+        "ethnicity": "West African features",
+        "skin": ["deep brown skin", "rich dark skin", "dark brown skin"],
+        "hair": ["jet black", "dark brown", "soft black with highlights"],
+        "eyes": ["dark brown", "brown", "amber"],
+    },
+    {
+        "ethnicity": "Southeast Asian features",
+        "skin": ["golden tan skin", "light brown skin", "medium brown skin", "warm medium skin"],
+        "hair": ["jet black", "dark brown"],
+        "eyes": ["dark brown", "brown"],
+    },
+    {
+        "ethnicity": "Slavic features",
+        "skin": ["fair porcelain skin", "light skin with cool undertone", "light skin with warm undertone"],
+        "hair": ["platinum blonde", "dirty blonde", "light brown", "chestnut brown", "dark brown"],
+        "eyes": ["blue", "gray-blue", "green", "hazel", "brown"],
+    },
+    {
+        "ethnicity": "mixed heritage features",
+        "skin": ["light brown skin", "golden tan skin", "medium olive skin", "warm medium skin"],
+        "hair": ["dark brown", "chestnut brown", "jet black", "auburn", "honey blonde"],
+        "eyes": ["hazel", "brown", "green", "amber", "dark brown"],
+    },
+]
+
+
+class BodyPreset(TypedDict):
+    body_type: str
+    heights: list[str]
+    breasts: list[str]
+
+
+# Bust lives only in distinguishing_features so body_type does not fight it.
+_BODIES: list[BodyPreset] = [
+    {
+        "body_type": "slim athletic adult figure, toned stomach",
+        "heights": ["average ~5'5\"", "tall ~5'8\"", "tall ~5'9\""],
+        "breasts": [
+            "small natural breasts, soft realistic shape",
+            "medium perky breasts, natural proportions",
+        ],
+    },
+    {
+        "body_type": "petite adult frame, narrow waist",
+        "heights": ["petite ~5'2\"", "petite ~5'3\""],
+        "breasts": [
+            "small natural breasts, soft realistic shape",
+            "medium perky breasts, natural proportions",
+        ],
+    },
+    {
+        "body_type": "soft hourglass adult figure, thick hips and thighs",
+        "heights": ["average ~5'4\"", "average ~5'5\"", "average ~5'6\""],
+        "breasts": [
+            "medium full breasts, natural proportions",
+            "full teardrop breasts with natural hang",
+            "large round breasts, realistic weight and hang",
+        ],
+    },
+    {
+        "body_type": "curvy thick adult figure, soft belly, wide hips",
+        "heights": ["average ~5'4\"", "average ~5'5\"", "average ~5'6\""],
+        "breasts": [
+            "full teardrop breasts with natural hang",
+            "large round breasts, realistic weight and hang",
+            "thick full breasts, soft natural shape",
+        ],
+    },
+    {
+        "body_type": "tall lean adult build, long legs",
+        "heights": ["tall ~5'8\"", "tall ~5'9\"", "tall ~5'10\""],
+        "breasts": [
+            "small natural breasts, soft realistic shape",
+            "medium perky breasts, natural proportions",
+            "medium full breasts, natural proportions",
+        ],
+    },
+    {
+        "body_type": "fit toned adult physique, defined waist",
+        "heights": ["average ~5'5\"", "average ~5'6\"", "tall ~5'8\""],
+        "breasts": [
+            "medium perky breasts, natural proportions",
+            "athletic chest, medium natural breasts",
+        ],
+    },
+    {
+        "body_type": "voluptuous adult figure, thick thighs, soft curves",
+        "heights": ["average ~5'4\"", "average ~5'5\"", "average ~5'6\""],
+        "breasts": [
+            "large round breasts, realistic weight and hang",
+            "heavy natural breasts, realistic weight and hang",
+        ],
+    },
+    {
+        "body_type": "soft feminine adult figure, rounded hips",
+        "heights": ["petite ~5'3\"", "average ~5'5\"", "average ~5'6\""],
+        "breasts": [
+            "medium full breasts, natural hang",
+            "full teardrop breasts with natural hang",
+        ],
+    },
+]
+
+_HAIR_BY_LENGTH: dict[str, list[str]] = {
+    "chin-length": ["sleek bob", "textured bob", "curtain bangs"],
+    "shoulder-length": ["loose waves", "straight sleek", "layered cut", "curtain bangs"],
+    "mid-back length": ["loose waves", "soft curls", "beach waves", "natural texture"],
+    "long": ["loose waves", "soft curls", "beach waves", "straight sleek", "natural texture"],
+}
+
+_EYE_SHAPE = ["almond-shaped eyes", "round eyes", "hooded eyes", "upturned eyes"]
+_FACE = ["oval face", "heart-shaped face", "soft square face", "diamond face", "round face"]
+_MAKEUP = [
+    "natural no-makeup look",
+    "soft glam makeup",
+    "nude lips and defined eyes",
+    "dewy skin, minimal makeup",
+    "classic red lip, otherwise natural",
+]
+# Default clothes only. Themes supply the shot outfit. Forced nude here
+# leaks into every gym/outdoor still and bakes one wardrobe into the LoRA.
+_WARDROBE = [
+    ["casual loungewear", "oversized tee"],
+    ["silk slip", "soft robe"],
+    ["lingerie", "sheer robe"],
+    ["fitted tank", "jeans"],
+    ["knit sweater", "simple trousers"],
+    ["athletic wear", "sports bra"],
+    ["simple bikini"],
+    ["little black dress"],
+    ["nude", "bare skin"],
+    ["topless", "waist-up bare"],
+]
+_STYLE = [
+    ["lifestyle photograph", "available light"],
+    ["editorial portrait", "shallow depth of field"],
+    ["candid documentary framing"],
+    ["glamour photography", "soft directional light"],
+]
+_FEATURES = [
+    "light freckles across the nose",
+    "beauty mark near the lip",
+    "dimples when smiling",
+    "high cheekbones",
+    "full lips",
+    "defined jawline",
+    "soft smile lines",
+    "long lashes",
+    "subtle collarbones",
+    "a small scar through the left eyebrow",
+    "a faint gap between the front teeth",
 ]
 
 _AGE_BANDS = [
@@ -28,114 +240,61 @@ _AGE_BANDS = [
     (AgeAppearanceBand.THIRTIES, 30, 35),
 ]
 
-_SKIN = [
-    "fair porcelain skin",
-    "light skin with warm undertone",
-    "medium olive skin",
-    "golden tan skin",
-    "light brown skin",
-    "deep brown skin",
-    "rich dark skin",
+
+class PersonaCluster(TypedDict):
+    tone: str
+    energy: str
+    humor: str
+    formality: str
+    traits: list[str]
+
+
+_CLUSTERS: list[PersonaCluster] = [
+    {
+        "tone": "warm",
+        "energy": "laid-back",
+        "humor": "playful teasing",
+        "formality": "warm",
+        "traits": ["warm", "playful", "curious", "empathetic", "grounded"],
+    },
+    {
+        "tone": "playful",
+        "energy": "high-energy",
+        "humor": "light banter",
+        "formality": "playful",
+        "traits": ["playful", "witty", "adventurous", "confident", "creative"],
+    },
+    {
+        "tone": "direct",
+        "energy": "balanced",
+        "humor": "dry wit",
+        "formality": "direct",
+        "traits": ["confident", "ambitious", "grounded", "witty", "calm"],
+    },
+    {
+        "tone": "soft-spoken",
+        "energy": "laid-back",
+        "humor": "self-deprecating",
+        "formality": "casual",
+        "traits": ["calm", "empathetic", "curious", "creative", "warm"],
+    },
+    {
+        "tone": "confident",
+        "energy": "sultry calm",
+        "humor": "dry wit",
+        "formality": "warm",
+        "traits": ["confident", "calm", "flirty", "grounded", "witty"],
+    },
 ]
 
-_ETHNICITY_HINTS = [
-    "Northern European features",
-    "Mediterranean features",
-    "East Asian features",
-    "South Asian features",
-    "Latina features",
-    "Middle Eastern features",
-    "West African features",
-    "mixed heritage features",
-    "Slavic features",
-    "Southeast Asian features",
-]
-
-_HAIR_COLOR = [
-    "platinum blonde", "honey blonde", "dirty blonde", "strawberry blonde",
-    "light brown", "chestnut brown", "dark brown", "jet black",
-    "auburn", "copper red", "soft black with highlights",
-]
-
-_HAIR_LENGTH = ["chin-length", "shoulder-length", "mid-back length", "long flowing"]
-_HAIR_STYLE = [
-    "loose waves", "straight sleek", "soft curls", "beach waves",
-    "half-up style", "layered cut", "curtain bangs", "natural texture",
-]
-
-_EYE_COLOR = ["blue", "green", "hazel", "brown", "dark brown", "gray-blue", "amber"]
-_EYE_SHAPE = ["almond-shaped eyes", "round eyes", "hooded eyes", "upturned eyes"]
-_FACE = ["oval face", "heart-shaped face", "soft square face", "diamond face", "round face"]
-_BODY = [
-    "slim athletic adult figure, small natural breasts, toned stomach",
-    "soft hourglass adult figure, full natural round breasts, thick hips and thighs",
-    "curvy thick adult figure, large natural round breasts, soft belly, wide hips",
-    "petite adult frame, perky natural breasts, narrow waist",
-    "tall lean adult build, medium teardrop breasts, long legs",
-    "fit toned adult physique, athletic chest, defined waist",
-    "voluptuous adult figure, heavy natural breasts, thick thighs, soft curves",
-    "soft feminine adult figure, medium full breasts, natural hang, rounded hips",
-]
-_BREAST = [
-    "natural round breasts",
-    "full teardrop breasts with natural hang",
-    "thick full breasts, soft natural shape",
-    "medium perky breasts, natural proportions",
-    "large round breasts, realistic weight and hang",
-    "small natural breasts, soft realistic shape",
-]
-_HEIGHT = ["petite ~5'2\"", "average ~5'5\"", "tall ~5'9\""]
-_MAKEUP = [
-    "natural no-makeup look, real skin texture visible",
-    "soft glam makeup, pores and peach fuzz still visible",
-    "nude lips and defined eyes, dewy realistic skin",
-    "dewy skin minimal makeup, unretouched look",
-    "classic red lip, natural skin not airbrushed",
-]
-_WARDROBE = [
-    ["nude", "naked", "bare skin"],
-    ["topless", "nude from the waist up"],
-    ["sheer lingerie", "robe open"],
-    ["silk slip", "barely-there lingerie"],
-    ["oversized tee only", "no bottoms"],
-    ["bikini", "wet skin"],
-    ["casual nude at home", "nothing on"],
-]
-_STYLE = [
-    ["photorealistic DSLR photo", "natural window light", "intimate nude portrait"],
-    ["raw photo", "85mm lens", "boudoir nude", "real skin texture"],
-    ["lifestyle photograph", "candid nude", "available light"],
-    ["glamour photography", "soft studio light", "tasteful full nude"],
-    ["editorial nude", "true-to-life colors", "shallow depth of field"],
-]
-_FEATURES = [
-    "light freckles across nose",
-    "beauty mark near lip",
-    "dimples when smiling",
-    "high cheekbones",
-    "full lips",
-    "defined jawline",
-    "soft smile lines",
-    "long lashes",
-    "visible skin pores",
-    "subtle collarbones",
-    "natural body hair stubble on legs none on face",
-]
-_TRAITS = [
-    "confident", "playful", "warm", "curious", "witty", "calm", "flirty",
-    "ambitious", "creative", "grounded", "adventurous", "empathetic",
-]
-_TONES = ["warm", "playful", "direct", "soft-spoken", "confident"]
-_ENERGY = ["laid-back", "high-energy", "balanced", "sultry calm"]
-_HUMOR = ["dry wit", "playful teasing", "self-deprecating", "light banter"]
 _INTERESTS = [
     "photography", "yoga", "travel", "cooking", "vinyl records", "hiking",
     "fashion design", "coffee culture", "contemporary art", "fitness",
+    "film photography", "strength training", "ceramics",
 ]
 _NICHES = [
-    "lifestyle", "glamour", "nude", "fashion", "boudoir", "casual", "editorial",
+    "lifestyle", "glamour", "fashion", "boudoir", "casual", "editorial", "fitness",
 ]
-_FORMALITY = ["casual", "warm", "playful", "direct"]
 _EMOJI = ["none", "light", "heavy"]
 
 _ATTESTATION = (
@@ -158,47 +317,53 @@ def build_random_character_create(
     seed: int | None = None,
     auto_attest: bool = True,
 ) -> CharacterCreate:
-    """Build a CharacterCreate payload with randomized adult-safe fields."""
+    """Build a CharacterCreate payload with a coherent adult appearance."""
     rng = random.Random(seed)
 
     first = _pick(rng, _FIRST_NAMES)
-    # Disambiguate common names
-    suffix = rng.randint(2, 99)
-    display_name = first if rng.random() > 0.35 else f"{first} {suffix}"
+    last = _pick(rng, _SURNAMES)
+    display_name = f"{first} {last}"
 
     band, age_lo, age_hi = _pick(rng, _AGE_BANDS)
     age_min = rng.randint(max(21, age_lo), age_hi)
 
-    hair_color = _pick(rng, _HAIR_COLOR)
-    eye_color = _pick(rng, _EYE_COLOR)
-    body = _pick(rng, _BODY)
-    ethnicity = _pick(rng, _ETHNICITY_HINTS)
-    skin = _pick(rng, _SKIN)
+    palette = _pick(rng, _PALETTES)
+    body = _pick(rng, _BODIES)
+    hair_length = _pick(rng, list(_HAIR_BY_LENGTH))
+    hair_style = _pick(rng, _HAIR_BY_LENGTH[hair_length])
+    cluster = _pick(rng, _CLUSTERS)
 
-    features = _sample(rng, _FEATURES, k=rng.randint(2, 3))
-    breasts = _pick(rng, _BREAST)
+    hair_color = _pick(rng, palette["hair"])
+    eye_color = _pick(rng, palette["eyes"])
+    skin = _pick(rng, palette["skin"])
+    ethnicity = palette["ethnicity"]
+    breasts = _pick(rng, body["breasts"])
+    height = _pick(rng, body["heights"])
+
+    features = _sample(rng, _FEATURES, k=rng.randint(1, 2))
     features = list(dict.fromkeys([*features, breasts]))
     style_kw = list(_pick(rng, _STYLE))
-    wardrobe = _pick(rng, _WARDROBE)
-    traits = _sample(rng, _TRAITS, k=rng.randint(3, 5))
+    clothed, bare = _WARDROBE[:-2], _WARDROBE[-2:]
+    wardrobe = list(_pick(rng, bare if rng.random() < 0.25 else clothed))
+
+    traits = _sample(rng, cluster["traits"], k=rng.randint(3, 5))
     interests = _sample(rng, _INTERESTS, k=rng.randint(2, 4))
     niches = _sample(rng, _NICHES, k=rng.randint(1, 3))
-
-    tone = _pick(rng, _TONES)
-    energy = _pick(rng, _ENERGY)
-    humor = _pick(rng, _HUMOR)
-    formality = _pick(rng, _FORMALITY)
     emoji = _pick(rng, _EMOJI)
 
-    bio = (
-        f"Synthetic adult persona. {tone.capitalize()} energy ({energy}), "
-        f"into {', '.join(interests[:2])}. Photogenic {body.split()[0]} look."
-    )
+    tone = cluster["tone"]
+    energy = cluster["energy"]
+    humor = cluster["humor"]
+    formality = cluster["formality"]
 
+    bio = (
+        f"Synthetic adult persona. {tone.capitalize()}, {energy}, "
+        f"into {', '.join(interests[:2])}."
+    )
     examples = [
-        f"hey — it's {first}. glad you're here.",
-        f"slow morning energy today. coffee first, then chaos.",
-        f"tell me what kind of shoot vibe you want next.",
+        f"hey — it's {first.lower()}. glad you're here.",
+        "slow morning. coffee first.",
+        "tell me what kind of shoot vibe you want next.",
     ]
 
     content_allowed = [
@@ -237,14 +402,14 @@ def build_random_character_create(
         eye_color=eye_color,
         eye_shape=_pick(rng, _EYE_SHAPE),
         hair_color=hair_color,
-        hair_style=_pick(rng, _HAIR_STYLE),
-        hair_length=_pick(rng, _HAIR_LENGTH),
-        body_type=body,
-        height_hint=_pick(rng, _HEIGHT),
+        hair_style=hair_style,
+        hair_length=hair_length,
+        body_type=body["body_type"],
+        height_hint=height,
         distinguishing_features=features,
         style_keywords=list(style_kw),
         makeup_style=_pick(rng, _MAKEUP),
-        typical_wardrobe=list(wardrobe),
+        typical_wardrobe=wardrobe,
         freeform_notes=freeform,
     )
 
@@ -284,5 +449,5 @@ def build_random_character_create(
         personality=personality,
         boundaries=boundaries,
         speaking_style=speaking,
-        trigger_word=None,  # service derives sks_* trigger
+        trigger_word=None,
     )
