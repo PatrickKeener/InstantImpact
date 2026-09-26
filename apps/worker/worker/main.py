@@ -79,12 +79,20 @@ def _job_timeout() -> float:
         return 14400.0
 
 
+async def _on_shutdown(ctx) -> None:
+    del ctx
+    from worker.gpu_session import teardown_gpu_hold
+
+    await teardown_gpu_hold()
+
+
 class WorkerSettings:
     functions = [run_generation_job]
     redis_settings = RedisSettings(host="127.0.0.1", port=6379)
     queue_name = "instantimpact"
     max_jobs = 1  # serialize heavy work; GPU lock also enforces single job
     job_timeout = _job_timeout()
+    on_shutdown = _on_shutdown
 
 
 def _weights_summary() -> str:
@@ -134,7 +142,9 @@ def main() -> None:
     pause = os.environ.get("INSTANTIMPACT_GPU_PAUSE_CONTAINERS") or "(none)"
     life = os.environ.get("INSTANTIMPACT_COMFY_LIFECYCLE") or "job"
     log.info("gpu services paused per job: %s", pause)
+    grace = os.environ.get("INSTANTIMPACT_COMFY_IDLE_GRACE") or "0"
     log.info("comfy lifecycle=%s (job=stop after stills, keep=unload only)", life)
+    log.info("comfy idle grace=%ss", grace)
     run_worker(WorkerSettings)  # type: ignore[arg-type]
 
 

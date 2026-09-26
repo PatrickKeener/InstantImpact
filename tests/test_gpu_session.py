@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from test_gpu_services import FakeContainer, install_fake_docker
-from worker.gpu_session import GpuSession
+from worker.gpu_session import GpuSession, reset_hold_for_tests
 
 
 class FakeComfy:
@@ -31,10 +33,13 @@ class FakeComfy:
 
 
 @pytest.fixture
-def fake_comfy(monkeypatch):
+async def fake_comfy(monkeypatch):
+    await reset_hold_for_tests()
     inst = FakeComfy()
     monkeypatch.setattr("worker.gpu_session.ComfyProcess", lambda: inst)
-    return inst
+    monkeypatch.setenv("INSTANTIMPACT_COMFY_IDLE_GRACE", "0")
+    yield inst
+    await reset_hold_for_tests()
 
 
 @pytest.mark.asyncio
@@ -99,6 +104,32 @@ async def test_train_session_stops_comfy_so_toolkit_owns_the_gpu(monkeypatch, fa
     assert fake_comfy.stop_calls == 1
     assert fake_comfy.ensure_calls == 0
     await session.release()
+    assert containers["vllm"].start_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_idle_grace_reuses_comfy_for_the_next_seed_set(monkeypatch, fake_comfy):
+    containers = {"vllm": FakeContainer("vllm", "running")}
+    install_fake_docker(monkeypatch, containers)
+    monkeypatch.setenv("INSTANTIMPACT_GPU_PAUSE_CONTAINERS", "vllm")
+    monkeypatch.setenv("INSTANTIMPACT_COMFY_LIFECYCLE", "job")
+    monkeypatch.setenv("INSTANTIMPACT_COMFY_IDLE_GRACE", "0.2")
+
+    first = GpuSession(kind="stills")
+    first.services.names = ["vllm"]
+    await first.acquire()
+    await first.release()
+    assert fake_comfy.stop_calls == 0
+    assert containers["vllm"].status == "exited"
+
+    second = GpuSession(kind="stills")
+    second.services.names = ["vllm"]
+    msg = await second.acquire()
+    assert "grace" in msg.lower()
+    assert fake_comfy.ensure_calls == 1
+    await second.release()
+    await asyncio.sleep(0.35)
+    assert fake_comfy.stop_calls == 1
     assert containers["vllm"].start_calls == 1
 
 
