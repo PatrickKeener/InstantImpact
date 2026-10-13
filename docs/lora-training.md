@@ -2,9 +2,29 @@
 
 Goal: stop face drift / cartoon variance by training a **per-character Flux LoRA** on approved photoreal stills, then using it on every still job.
 
+## Collect matching stills first
+
+Flux txt2img draws a **new person on every random seed**. Clicking **Hunt faces**
+repeatedly will not fill a LoRA set.
+
+1. **Hunt faces (6)** until one still looks like the persona.
+2. Open it → **Lock this face** (or **Lock face + generate 8**). The first Approve
+   also locks if nothing is locked yet. The full still is copied to
+   `refs/identity_source.png` (img2img latent) and a head crop to
+   `refs/face_primary.png` (PuLID + likeness scoring).
+3. Click **More of this face (8)**. Those stills img2img the locked frame at mid
+   denoise with pose/outfit/crop variations (random seeds). Approve matches,
+   reject drift. A still below ~45% likeness is blocked unless you force-approve.
+4. Repeat until you have **12–30** matching stills of that same person. Train
+   skips stills below ~55% likeness and near-duplicates.
+5. PuLID auto-enables on expand when `models/pulid/*.safetensors` exists and Comfy
+   has `ApplyPulidFlux`. Set a filename in Still quality to force it on.
+
+Do not approve a mix of different people into the training set.
+
 ## One-click (recommended)
 
-1. Approve 12–30 photoreal stills in Studio.
+1. Approve 12–30 photoreal stills of the **locked** face in Studio.
 2. Click **Train LoRA & register**.
 3. Wait for the `lora_train` job (GPU exclusive, typically 20–90 minutes on L40S).
 4. On success the worker writes `model.safetensors` and the API registers it into Comfy.

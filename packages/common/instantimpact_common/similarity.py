@@ -68,6 +68,18 @@ def best_ref_similarity(image_path: Path, refs_dir: Path | None) -> float | None
     return max(scores) if scores else None
 
 
+def crop_face_image(src: Path, dest: Path) -> Path:
+    """Write a head crop of `src` to `dest` (PNG). InsightFace bbox when available."""
+    from PIL import Image
+
+    with Image.open(src) as im:
+        rgb = im.convert("RGB")
+        box = _detected_face_box(rgb) or _face_crop_box(*rgb.size)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        rgb.crop(box).save(dest, "PNG")
+    return dest
+
+
 def _face_crop_box(width: int, height: int) -> tuple[int, int, int, int]:
     left = int(width * 0.12)
     right = int(width * 0.88)
@@ -76,6 +88,37 @@ def _face_crop_box(width: int, height: int) -> tuple[int, int, int, int]:
     if right <= left or bottom <= top:
         return 0, 0, width, height
     return left, top, right, bottom
+
+
+def _detected_face_box(image) -> tuple[int, int, int, int] | None:
+    """Padded InsightFace bbox on the full frame, or None if unavailable."""
+    app = _insightface_app()
+    if app is None:
+        return None
+    try:
+        import numpy as np
+
+        arr = np.asarray(image.convert("RGB"))[:, :, ::-1]
+        faces = app.get(arr)
+        if not faces:
+            return None
+        face = max(
+            faces,
+            key=lambda f: float((f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1])),
+        )
+        x1, y1, x2, y2 = (int(v) for v in face.bbox)
+        w, h = image.size
+        bw = max(1, x2 - x1)
+        bh = max(1, y2 - y1)
+        left = max(0, x1 - int(bw * 0.35))
+        top = max(0, y1 - int(bh * 0.55))
+        right = min(w, x2 + int(bw * 0.35))
+        bottom = min(h, y2 + int(bh * 0.25))
+        if right - left < 16 or bottom - top < 16:
+            return None
+        return left, top, right, bottom
+    except Exception:
+        return None
 
 
 def _open_face_gray(path: Path):

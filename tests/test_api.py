@@ -336,3 +336,163 @@ def test_character_still_approve_dataset_lock(client: TestClient):
     )
     assert exp.status_code == 200, exp.text
     assert exp.json()["export_path"]
+
+
+def _wait_job(client: TestClient, job_id: str, timeout: float = 4.0) -> dict:
+    import time
+
+    deadline = time.time() + timeout
+    job = client.get(f"/api/jobs/{job_id}").json()
+    while time.time() < deadline and job["status"] in ("queued", "running"):
+        time.sleep(0.05)
+        job = client.get(f"/api/jobs/{job_id}").json()
+    return job
+
+
+def test_seed_gallery_hunt_uses_distinct_random_seeds(client: TestClient):
+    cid = _create_attested(client, "Hunt Seeds")["id"]
+    assert client.post(f"/api/characters/{cid}/bootstrap").status_code == 200
+    job = client.post(
+        f"/api/characters/{cid}/seed-gallery",
+        json={"count": 4, "mode": "hunt", "themes": ["portrait"]},
+    )
+    assert job.status_code == 200, job.text
+    seeds = [item["request"]["seed"] for item in job.json()["items"]]
+    assert len(seeds) == 4
+    assert all(s is not None for s in seeds)
+    assert len(set(seeds)) == 4
+
+
+def test_seed_gallery_expand_requires_face_lock(client: TestClient):
+    cid = _create_attested(client, "Need Lock")["id"]
+    assert client.post(f"/api/characters/{cid}/bootstrap").status_code == 200
+    r = client.post(
+        f"/api/characters/{cid}/seed-gallery",
+        json={"count": 2, "mode": "expand"},
+    )
+    assert r.status_code == 400
+    assert "Lock a face" in r.json()["detail"]
+
+
+def test_lock_face_then_expand_varies_pose(client: TestClient):
+    cid = _create_attested(client, "Lock Expand")["id"]
+    assert client.post(f"/api/characters/{cid}/bootstrap").status_code == 200
+    hunt = client.post(
+        f"/api/characters/{cid}/seed-gallery",
+        json={"count": 2, "mode": "hunt", "themes": ["portrait"]},
+    )
+    assert hunt.status_code == 200, hunt.text
+    done = _wait_job(client, hunt.json()["id"])
+    assert done["status"] == "completed", done
+
+    assets = client.get(f"/api/characters/{cid}/assets").json()
+    assert assets, "hunt should produce stills"
+    asset = assets[0]
+    locked_seed = asset["seed"]
+    lock = client.post(
+        f"/api/characters/{cid}/identity-lock",
+        json={"asset_id": asset["id"], "generate_count": 4},
+    )
+    assert lock.status_code == 200, lock.text
+    body = lock.json()
+    assert body["identity_lock"]["asset_id"] == asset["id"]
+    assert body["identity_lock"]["seed"] == locked_seed
+    assert body["identity_lock"]["face_ref"]
+    assert body["identity_lock"]["identity_source"]
+    expand = body["job"]
+    assert expand is not None
+    expand_seeds = [item["request"]["seed"] for item in expand["items"]]
+    assert len(expand_seeds) == 4
+    assert all(s is not None for s in expand_seeds)
+    assert len(set(expand_seeds)) == 4
+    poses = [item["request"].get("pose_hint") for item in expand["items"]]
+    assert len(set(poses)) >= 3
+
+    char = client.get(f"/api/characters/{cid}").json()
+    lock_out = char["current_version"]["identity_lock"]
+    face_ref = lock_out["face_ref"]
+    media = client.get(f"/api/system/media/{face_ref}")
+    assert media.status_code == 200
+    source = client.get(f"/api/system/media/{lock_out['identity_source']}")
+    assert source.status_code == 200
+
+    # Default seed gallery follows the lock (expand) instead of hunting a new person.
+    again = client.post(f"/api/characters/{cid}/seed-gallery", json={"count": 3})
+    assert again.status_code == 200, again.text
+    again_seeds = [item["request"]["seed"] for item in again.json()["items"]]
+    assert len(set(again_seeds)) == 3
+    assert again.json()["items"][0]["request"].get("pose_hint")
+
+    unlocked = client.delete(f"/api/characters/{cid}/identity-lock")
+    assert unlocked.status_code == 200, unlocked.text
+    char2 = client.get(f"/api/characters/{cid}").json()
+    assert not char2["current_version"].get("identity_lock")
+
+
+def test_first_approve_autolocks_identity(client: TestClient):
+    cid = _create_attested(client, "Auto Lock")["id"]
+    assert client.post(f"/api/characters/{cid}/bootstrap").status_code == 200
+    hunt = client.post(
+        f"/api/characters/{cid}/seed-gallery",
+        json={"count": 2, "mode": "hunt", "themes": ["portrait"]},
+    )
+    assert hunt.status_code == 200, hunt.text
+    done = _wait_job(client, hunt.json()["id"])
+    assert done["status"] == "completed", done
+    assets = client.get(f"/api/characters/{cid}/assets").json()
+    first = assets[0]
+    d = client.post(f"/api/assets/{first['id']}/decision", json={"decision": "approved"})
+    assert d.status_code == 200, d.text
+    char = client.get(f"/api/characters/{cid}").json()
+    lock = char["current_version"]["identity_lock"]
+    assert lock["asset_id"] == first["id"]
+    assert lock["seed"] == first["seed"]
+    assert lock["face_ref"]
+    assert lock["identity_source"]
+
+
+def test_approve_unlike_still_requires_force(client: TestClient):
+    import os
+    import random
+
+    from PIL import Image
+
+    cid = _create_attested(client, "Unlike Gate")["id"]
+    assert client.post(f"/api/characters/{cid}/bootstrap").status_code == 200
+    hunt = client.post(
+        f"/api/characters/{cid}/seed-gallery",
+        json={"count": 2, "mode": "hunt", "themes": ["portrait"]},
+    )
+    assert hunt.status_code == 200, hunt.text
+    done = _wait_job(client, hunt.json()["id"])
+    assert done["status"] == "completed", done
+    assets = client.get(f"/api/characters/{cid}/assets").json()
+    first, other = assets[0], assets[1]
+    lock = client.post(
+        f"/api/characters/{cid}/identity-lock",
+        json={"asset_id": first["id"]},
+    )
+    assert lock.status_code == 200, lock.text
+
+    data = Path(os.environ["INSTANTIMPACT_DATA_DIR"])
+    still = data / other["path"]
+    unlike = Image.new("RGB", (768, 960))
+    px = unlike.load()
+    rng = random.Random(2)
+    for ty in range(0, 960, 64):
+        for tx in range(0, 768, 64):
+            col = (rng.randint(0, 255), rng.randint(0, 255), rng.randint(0, 255))
+            for y in range(ty, min(ty + 64, 960)):
+                for x in range(tx, min(tx + 64, 768)):
+                    px[x, y] = col
+    unlike.save(still)
+    blocked = client.post(
+        f"/api/assets/{other['id']}/decision", json={"decision": "approved"}
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert "Likeness" in blocked.json()["detail"]
+    forced = client.post(
+        f"/api/assets/{other['id']}/decision",
+        json={"decision": "approved", "force": True},
+    )
+    assert forced.status_code == 200, forced.text

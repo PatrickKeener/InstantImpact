@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.db.models import Asset, ContentBrief, Job, JobItem
 from app.schemas.jobs import SeedGalleryRequest, StillBatchRequest
 from app.services import characters as char_svc
+from app.services import identity as identity_svc
 from app.services.storage import get_layout, relative_to_data, write_json
 from instantimpact_common.enums import CharacterStatus, JobItemStatus, JobStatus, JobType
 from instantimpact_common.safety import validate_for_enqueue
@@ -231,13 +232,18 @@ async def _enqueue(
             if blocked:
                 raise JobServiceError(blocked, 503)
 
-    # Assign seeds (keep any seed already set, e.g. regenerate)
-    base_seed = random.randint(1, 2**31 - 1)
+    # Assign seeds (keep any seed already set, e.g. regenerate), unless the
+    # policy is "same" — that overwrites so a whole expand set shares one face.
+    explicit = next((int(u.seed) for u in units if u.seed is not None), None)
+    base_seed = explicit if explicit is not None else random.randint(1, 2**31 - 1)
+    policy = (seed_policy or "random").strip().lower()
     for i, u in enumerate(units):
         u.aspect_ratio = aspect_ratio
-        if u.seed is not None:
+        if policy == "same":
+            u.seed = base_seed
+        elif u.seed is not None:
             continue
-        if seed_policy == "fixed_base":
+        elif policy == "fixed_base":
             u.seed = base_seed + i
         else:
             u.seed = random.randint(1, 2**31 - 1)
@@ -369,29 +375,68 @@ async def _try_arq_enqueue(job_id: str, request_path: str, job_type: str) -> Non
         await redis.close()
 
 
+def _seed_gallery_mode(payload: SeedGalleryRequest, lock: dict | None) -> str:
+    raw = (payload.mode or "").strip().lower()
+    if raw in {"hunt", "expand"}:
+        return raw
+    return "expand" if lock else "hunt"
+
+
 async def enqueue_seed_gallery(
     db: AsyncSession,
     character_id: str,
     payload: SeedGalleryRequest,
     background_tasks: BackgroundTasks | None = None,
 ) -> dict:
-    themes = payload.themes or ["portrait"]
-    units: list[StillUnitRequest] = []
-    for i in range(payload.count):
-        units.append(
+    try:
+        c = await char_svc.get_character(db, character_id)
+    except char_svc.CharacterServiceError as e:
+        raise JobServiceError(e.message, e.status_code) from e
+    version = _version_for_generation(c)
+    lock = identity_svc.read_lock(version)
+    mode = _seed_gallery_mode(payload, lock)
+    seed_policy = (payload.seed_policy or "").strip().lower() or None
+
+    if mode == "expand":
+        if not lock:
+            raise JobServiceError(
+                "Lock a face from Outputs first (click Lock this face), then generate more of that person"
+            )
+        if not seed_policy:
+            seed_policy = "random"
+        lock_seed = payload.seed if payload.seed is not None else lock.get("seed")
+        units = identity_svc.variation_units(
+            count=payload.count,
+            aspect_ratio=payload.aspect_ratio,
+            seed=int(lock_seed)
+            if lock_seed is not None and seed_policy == "same"
+            else None,
+        )
+    else:
+        themes = payload.themes or ["portrait"]
+        units = [
             StillUnitRequest(
                 item_index=i,
+                seed=int(payload.seed) + i
+                if payload.seed is not None and seed_policy == "fixed_base"
+                else (int(payload.seed) if payload.seed is not None and i == 0 else None),
                 theme=themes[i % len(themes)],
                 aspect_ratio=payload.aspect_ratio,
             )
-        )
+            for i in range(payload.count)
+        ]
+        if not seed_policy:
+            seed_policy = "random"
+
     job = await _enqueue(
         db,
         job_type=JobType.SEED_GALLERY,
         character_id=character_id,
         units=units,
         aspect_ratio=payload.aspect_ratio,
+        seed_policy=seed_policy,
         background_tasks=background_tasks,
+        extra_meta={"identity_mode": mode, "identity_seed": lock.get("seed") if lock else None},
     )
     return job_to_out(job)
 
@@ -404,10 +449,14 @@ async def enqueue_still_batch(
 ) -> dict:
     units = _expand_brief_items(payload.items)
     if payload.seed is not None and units:
-        units[0].seed = int(payload.seed)
-        for i, u in enumerate(units[1:], start=1):
-            if payload.seed_policy == "fixed_base":
-                u.seed = int(payload.seed) + i
+        base = int(payload.seed)
+        for i, u in enumerate(units):
+            if payload.seed_policy == "same":
+                u.seed = base
+            elif payload.seed_policy == "fixed_base":
+                u.seed = base + i
+            elif i == 0:
+                u.seed = base
     brief_id = None
     if payload.title:
         brief = ContentBrief(
@@ -518,13 +567,34 @@ async def enqueue_regenerate(
     asset_id: str,
     *,
     count: int = 1,
+    more_like: bool = False,
     background_tasks: BackgroundTasks | None = None,
 ) -> dict:
-    """Re-run a still using the original brief hints; count=1 reuses the seed."""
+    """Re-run a still using the original brief hints; count=1 reuses the seed.
+
+    more_like locks this still as the face and generates pose/outfit variations
+    via expand img2img from the locked still.
+    """
     q = await db.execute(select(Asset).where(Asset.id == asset_id))
     asset = q.scalar_one_or_none()
     if not asset or asset.character_id != character_id:
         raise JobServiceError("Asset not found", 404)
+    if more_like:
+        try:
+            lock = await identity_svc.apply_identity_lock(db, character_id, asset, approve=True)
+        except char_svc.CharacterServiceError as e:
+            raise JobServiceError(e.message, e.status_code) from e
+        await db.commit()
+        return await enqueue_seed_gallery(
+            db,
+            character_id,
+            SeedGalleryRequest(
+                count=count,
+                aspect_ratio="4:5",
+                mode="expand",
+            ),
+            background_tasks=background_tasks,
+        )
     req: dict[str, Any] = {}
     if asset.job_item_id:
         iq = await db.execute(select(JobItem).where(JobItem.id == asset.job_item_id))
@@ -560,6 +630,48 @@ async def enqueue_regenerate(
         background_tasks=background_tasks,
     )
     return job_to_out(job)
+
+
+async def lock_identity(
+    db: AsyncSession,
+    character_id: str,
+    asset_id: str,
+    *,
+    generate_count: int = 0,
+    background_tasks: BackgroundTasks | None = None,
+) -> dict:
+    try:
+        lock = await identity_svc.lock_from_asset_id(db, character_id, asset_id)
+    except char_svc.CharacterServiceError as e:
+        raise JobServiceError(e.message, e.status_code) from e
+    job = None
+    if generate_count:
+        job = await enqueue_seed_gallery(
+            db,
+            character_id,
+            SeedGalleryRequest(
+                count=generate_count,
+                mode="expand",
+            ),
+            background_tasks=background_tasks,
+        )
+    c = await char_svc.get_character(db, character_id)
+    return {
+        "character_id": character_id,
+        "identity_lock": lock,
+        "character": char_svc.character_to_out(c),
+        "job": job,
+    }
+
+
+async def unlock_identity(db: AsyncSession, character_id: str) -> dict:
+    try:
+        result = await identity_svc.unlock_identity(db, character_id)
+    except char_svc.CharacterServiceError as e:
+        raise JobServiceError(e.message, e.status_code) from e
+    c = await char_svc.get_character(db, character_id)
+    result["character"] = char_svc.character_to_out(c)
+    return result
 
 
 async def cancel_job(db: AsyncSession, job_id: str) -> dict:
@@ -770,7 +882,13 @@ async def list_assets(db: AsyncSession, character_id: str, decision: str | None 
 
 
 async def set_asset_decision(
-    db: AsyncSession, asset_id: str, decision: str, score: int | None = None, notes: str | None = None
+    db: AsyncSession,
+    asset_id: str,
+    decision: str,
+    score: int | None = None,
+    notes: str | None = None,
+    *,
+    force: bool = False,
 ) -> dict:
     q = await db.execute(select(Asset).where(Asset.id == asset_id))
     asset = q.scalar_one_or_none()
@@ -778,6 +896,30 @@ async def set_asset_decision(
         raise JobServiceError("Asset not found", 404)
     if decision not in ("pending", "approved", "rejected"):
         raise JobServiceError("Invalid decision")
+
+    if decision == "approved" and not force:
+        try:
+            c = await char_svc.get_character(db, asset.character_id)
+        except char_svc.CharacterServiceError as e:
+            raise JobServiceError(e.message, e.status_code) from e
+        version = char_svc._working_version(c)
+        lock = identity_svc.read_lock(version)
+        if lock and str(lock.get("asset_id") or "") != asset.id:
+            layout = get_layout()
+            refs = layout.refs_dir(c.id, version.version_int) if version else None
+            likeness = identity_svc.likeness_for_asset(asset, refs)
+            if (
+                likeness is not None
+                and likeness < identity_svc.LIKENESS_APPROVE_MIN
+            ):
+                pct = round(likeness * 100)
+                gate = round(identity_svc.LIKENESS_APPROVE_MIN * 100)
+                raise JobServiceError(
+                    f"Likeness {pct}% is below the {gate}% gate for the locked face. "
+                    "Reject this still, or approve anyway.",
+                    409,
+                )
+
     asset.decision = decision
     if score is not None or notes:
         from app.db.models import AssetRating
@@ -789,6 +931,8 @@ async def set_asset_decision(
                 notes=notes,
             )
         )
+    if decision == "approved":
+        await identity_svc.maybe_autolock(db, asset)
     await db.commit()
     return {
         "id": asset.id,

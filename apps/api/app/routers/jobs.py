@@ -15,6 +15,7 @@ from app.schemas.jobs import (
     AssetDeleteResponse,
     AssetOut,
     GpuStatusOut,
+    IdentityLockRequest,
     JobOut,
     RegenerateAssetRequest,
     SeedGalleryRequest,
@@ -124,7 +125,12 @@ async def asset_decision(
 ):
     try:
         return await svc.set_asset_decision(
-            db, asset_id, payload.decision, score=payload.score, notes=payload.notes
+            db,
+            asset_id,
+            payload.decision,
+            score=payload.score,
+            notes=payload.notes,
+            force=payload.force,
         )
     except svc.JobServiceError as e:
         raise _err(e) from e
@@ -188,8 +194,36 @@ async def regenerate_asset(
             character_id,
             asset_id,
             count=body.count,
+            more_like=body.more_like,
             background_tasks=background_tasks,
         )
+    except svc.JobServiceError as e:
+        raise _err(e) from e
+
+
+@router.post("/characters/{character_id}/identity-lock")
+async def lock_identity(
+    character_id: str,
+    payload: IdentityLockRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await svc.lock_identity(
+            db,
+            character_id,
+            payload.asset_id,
+            generate_count=payload.generate_count,
+            background_tasks=background_tasks,
+        )
+    except svc.JobServiceError as e:
+        raise _err(e) from e
+
+
+@router.delete("/characters/{character_id}/identity-lock")
+async def unlock_identity(character_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        return await svc.unlock_identity(db, character_id)
     except svc.JobServiceError as e:
         raise _err(e) from e
 

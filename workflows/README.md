@@ -30,6 +30,7 @@ Optional stages (same node ids on every template; the worker drops unused ones):
 | 15–19 + 14 | Pixel hi-res (decode → optional upscale model → lanczos → encode → low denoise) | `hires_fix` is false |
 | 16–17 | `UpscaleModelLoader` + `ImageUpscaleWithModel` | no `UPSCALE_MODEL_NAME` (lanczos only) |
 | 30–34 | PuLID-Flux identity | no model filename or no face ref |
+| 40–42 | Identity img2img (LoadImage → scale → VAEEncode into sampler 3) | hunt / no locked still; sampler denoise binds `BASE_DENOISE` (1.0 when dropped) |
 
 ## `flux_still_character_lora_v1.json`
 

@@ -7,7 +7,7 @@
     "vae": "ae.safetensors (ComfyUI/models/vae/)",
     "lora": "ComfyUI/models/loras/{{LORA_NAME}}",
     "required_custom_nodes": ["PulidFluxModelLoader", "PulidFluxEvaClipLoader", "PulidFluxInsightFaceLoader", "ApplyPulidFlux"],
-    "note": "Mirrors flux_still_character_lora_v1 node-for-node; only the loaders differ, so detail LoRA, pixel hi-res, and PuLID drop identically."
+    "note": "Mirrors flux_still_character_lora_v1 node-for-node; only the loaders differ, so detail LoRA, pixel hi-res, PuLID, and identity img2img (nodes 40-42) drop identically. Sampler 3 denoise is BASE_DENOISE."
   },
   "20": {
     "class_type": "UNETLoader",
@@ -109,6 +109,29 @@
       "batch_size": 1
     }
   },
+  "40": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{IDENTITY_IMAGE}}"
+    }
+  },
+  "41": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "upscale_method": "lanczos",
+      "width": "{{WIDTH}}",
+      "height": "{{HEIGHT}}",
+      "crop": "center",
+      "image": ["40", 0]
+    }
+  },
+  "42": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": ["41", 0],
+      "vae": ["22", 0]
+    }
+  },
   "3": {
     "class_type": "KSampler",
     "inputs": {
@@ -117,11 +140,11 @@
       "cfg": "{{CFG}}",
       "sampler_name": "{{SAMPLER_NAME}}",
       "scheduler": "{{SCHEDULER}}",
-      "denoise": 1.0,
+      "denoise": "{{BASE_DENOISE}}",
       "model": ["34", 0],
       "positive": ["6", 0],
       "negative": ["7", 0],
-      "latent_image": ["5", 0]
+      "latent_image": ["42", 0]
     }
   },
   "15": {

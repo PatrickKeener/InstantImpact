@@ -72,15 +72,19 @@ The second pass no longer uses `LatentUpscale` `nearest-exact`. It decodes the b
 
 ## Phase 5 — PuLID-Flux (done, optional)
 
-Identity lock from the generate-only ref pack. Off unless a model filename is set **and** a face still exists under the version `refs/` folder (`face_primary.png` preferred).
+Identity lock from the generate-only ref pack.
+
+- **Img2img expand:** after a face lock, **More of this face** encodes `refs/identity_source.png` (full locked still) into sampler 3 at `identity_denoise` (~0.58). Hunt stays txt2img at denoise 1.0.
+- **PuLID:** auto-on for expand (and still batches) when `models/pulid/pulid*.safetensors` exists, a face ref exists, and Comfy `/object_info` has `ApplyPulidFlux`. Hunt leaves it off. An explicit `pulid_model_name` / `INSTANTIMPACT_PULID_MODEL` still fail-closes if the nodes are missing.
+- Face ref prefers the tight `refs/face_primary.png` crop written at lock time.
 
 1. Install [ComfyUI-PuLID-Flux](https://github.com/balazik/ComfyUI-PuLID-Flux) (or a fork that keeps `ApplyPulidFlux` / `PulidFluxModelLoader` class names).
 2. Place `pulid_flux_v0.9.1.safetensors` (or the current ByteDance Flux PuLID file) in `ComfyUI/models/pulid/`.
-3. Set `INSTANTIMPACT_PULID_MODEL=pulid_flux_v0.9.1.safetensors` or paste the filename in Studio.
-4. Build a dataset once so `refs/face_primary.png` exists, or copy a front face still there.
+3. Optional: set `INSTANTIMPACT_PULID_MODEL=pulid_flux_v0.9.1.safetensors` or paste the filename in Studio to force PuLID on.
+4. Lock a face in Studio so `refs/face_primary.png` and `refs/identity_source.png` exist.
 5. Start at strength **0.7**. InsightFace provider defaults to `CUDA`; set `INSTANTIMPACT_PULID_PROVIDER=CPU` if needed.
 
-The worker uploads the face ref to Comfy's input folder and drops the PuLID subgraph when the model or ref is missing, so stock Comfy without those custom nodes keeps working.
+The worker uploads the face ref to Comfy's input folder and drops the PuLID subgraph when the model or ref is missing, so stock Comfy without those custom nodes keeps working. Auto-discovered PuLID is skipped when `ApplyPulidFlux` is absent.
 
 IP-Adapter strength remains on `FluxPipelineParams` for a later SDXL / Flux-Redux path.
 
@@ -88,6 +92,6 @@ IP-Adapter strength remains on `FluxPipelineParams` for a later SDXL / Flux-Redu
 
 - Dataset captions are trigger + pose/light/outfit/crop. Hair/eyes/body are not restated so the LoRA does not require those tokens at inference.
 - Default LoRA dim is **32** (`INSTANTIMPACT_LORA_DIM` / `lora_dim` setting).
-- Review score is a face-weighted dHash + color histogram on the upper-center crop. InsightFace cosine similarity is used when that package is installed. Studio Outputs can sort by **best match**.
+- Review score is a face-weighted dHash + color histogram on the upper-center crop. InsightFace cosine similarity is used when that package is installed. Studio Outputs sort by **best match** after a face lock. Approve is blocked below ~45% likeness (force override). Train copies stills at or above ~55% and skips near-duplicates (≥0.97).
 
 See also `docs/model_cards.md` (swap rules) and `docs/lora-training.md`.

@@ -130,6 +130,28 @@ async def process_still_job(
         await lock.release()
 
 
+def _identity_source_path(refs: Path | None) -> Path | None:
+    """Full locked still for img2img. Falls back to the face crop if needed."""
+    if not refs or not refs.is_dir():
+        return None
+    for name in ("identity_source.png", "identity_source.jpg", "identity_source.webp"):
+        candidate = refs / name
+        if candidate.is_file():
+            return candidate
+    return _face_ref_path(refs)
+
+
+def _base_denoise(flux_params: dict, *, img2img: bool) -> float:
+    if not img2img:
+        return 1.0
+    raw = flux_params.get("identity_denoise")
+    try:
+        value = 0.58 if raw is None else float(raw)
+    except (TypeError, ValueError):
+        value = 0.58
+    return max(0.35, min(value, 0.85))
+
+
 def _face_ref_path(refs: Path | None) -> Path | None:
     """Prefer a named face still from the generate-only ref pack."""
     if not refs or not refs.is_dir():
@@ -316,11 +338,13 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         FLUX_STILL_SPLIT_LORA_REQUIRED_VARS,
         FLUX_STILL_SPLIT_REQUIRED_VARS,
         HIRES_VARS,
+        IDENTITY_IMG2IMG_VARS,
         PULID_VARS,
         UPSCALE_MODEL_VARS,
         bind_workflow,
         bypass_node,
         drop_hires_subgraph,
+        drop_identity_img2img,
         drop_pulid,
         drop_upscale_model,
         load_workflow,
@@ -451,8 +475,53 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         required = required | DETAIL_LORA_VARS
     else:
         template = bypass_node(template, DETAIL_LORA_NODE_ID, DETAIL_LORA_OUTPUTS)
+
+    client = ComfyClient(
+        comfy_url, timeout=float(os.environ.get("INSTANTIMPACT_COMFY_TIMEOUT", "600"))
+    )
+    if not await client.health():
+        await _publish(
+            redis,
+            {
+                "job_id": job_id,
+                "event": "failed",
+                "error_code": "comfy_unreachable",
+                "message": f"ComfyUI not healthy at {comfy_url}",
+            },
+        )
+        return {"ok": False}
+
+    identity_mode = str((snapshot.get("meta") or {}).get("identity_mode") or "").strip().lower() or None
+    identity_source = _identity_source_path(refs)
+    use_img2img = identity_mode == "expand" and identity_source is not None and not use_lora
+    base_denoise = _base_denoise(flux_params, img2img=use_img2img)
+    if use_img2img:
+        required = required | IDENTITY_IMG2IMG_VARS
+    else:
+        template = drop_identity_img2img(template)
+
     face_ref = _face_ref_path(refs)
-    use_pulid = bool(pulid_model_name and face_ref and pulid_strength > 0)
+    explicit_pulid = pulid_model_name
+    if explicit_pulid:
+        use_pulid = bool(explicit_pulid and face_ref and pulid_strength > 0)
+    else:
+        discovered = None
+        if face_ref and pulid_strength > 0 and identity_mode != "hunt":
+            from instantimpact_common.flux_inventory import (
+                discover_pulid_model,
+                resolve_comfy_root,
+            )
+
+            discovered = discover_pulid_model(
+                resolve_comfy_root(os.environ.get("INSTANTIMPACT_COMFY_DIR"))
+            )
+        has_nodes = False
+        if discovered:
+            object_info = await client.object_info()
+            has_nodes = bool(object_info and "ApplyPulidFlux" in object_info)
+        use_pulid = bool(discovered and has_nodes)
+        if use_pulid:
+            pulid_model_name = discovered
     if use_pulid:
         required = required | PULID_VARS
     else:
@@ -478,22 +547,8 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         )
         return {"ok": False}
 
-    client = ComfyClient(
-        comfy_url, timeout=float(os.environ.get("INSTANTIMPACT_COMFY_TIMEOUT", "600"))
-    )
-    if not await client.health():
-        await _publish(
-            redis,
-            {
-                "job_id": job_id,
-                "event": "failed",
-                "error_code": "comfy_unreachable",
-                "message": f"ComfyUI not healthy at {comfy_url}",
-            },
-        )
-        return {"ok": False}
-
     face_ref_image = None
+    identity_image = None
     if use_pulid:
         assert face_ref is not None
         try:
@@ -509,6 +564,24 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
                     "event": "failed",
                     "error_code": "pulid_ref_upload_failed",
                     "message": f"Could not upload face ref for PuLID: {exc}",
+                },
+            )
+            return {"ok": False}
+    if use_img2img:
+        assert identity_source is not None
+        try:
+            identity_image = await client.upload_image(
+                identity_source.read_bytes(),
+                f"ii_id_{job_id[:8]}{identity_source.suffix.lower() or '.png'}",
+            )
+        except Exception as exc:
+            await _publish(
+                redis,
+                {
+                    "job_id": job_id,
+                    "event": "failed",
+                    "error_code": "identity_upload_failed",
+                    "message": f"Could not upload locked still for img2img: {exc}",
                 },
             )
             return {"ok": False}
@@ -580,6 +653,7 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             "SAMPLER_NAME": sampler_name,
             "SCHEDULER": scheduler,
             "FILENAME_PREFIX": prefix,
+            "BASE_DENOISE": base_denoise,
         }
         if split_weights:
             variables.update(_split_weight_vars())
@@ -606,6 +680,8 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             variables["PULID_STRENGTH"] = pulid_strength
             variables["PULID_PROVIDER"] = pulid_provider
             variables["FACE_REF_IMAGE"] = face_ref_image
+        if use_img2img:
+            variables["IDENTITY_IMAGE"] = identity_image
 
         try:
             bound = bind_workflow(template, variables)
@@ -669,6 +745,9 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
                 "upscale_model_name": upscale_model_name if hires_fix else None,
                 "pulid_model_name": pulid_model_name if use_pulid else None,
                 "pulid_strength": pulid_strength if use_pulid else None,
+                "identity_img2img": use_img2img,
+                "base_denoise": base_denoise,
+                "identity_source": str(identity_source) if use_img2img else None,
                 "clip_l_prompt": clip_l,
                 "ref_pack": str(refs) if refs else None,
                 **shot_meta_from_item(item),

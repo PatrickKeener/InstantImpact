@@ -7,9 +7,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "worker"))
 
 from worker.tasks.stills import (
+    _base_denoise,
     _ensure_adult_prompt,
     _face_ref_path,
     _hires_size,
+    _identity_source_path,
     _sampler_cfg,
     _size_for_aspect,
 )
@@ -73,6 +75,37 @@ def test_face_ref_prefers_named_primary(tmp_path):
     chosen = _face_ref_path(refs)
     assert chosen is not None
     assert chosen.name == "face_primary.png"
+
+
+def test_identity_source_prefers_full_still(tmp_path):
+    refs = tmp_path / "refs"
+    refs.mkdir()
+    (refs / "face_primary.png").write_bytes(b"crop")
+    (refs / "identity_source.png").write_bytes(b"full")
+    chosen = _identity_source_path(refs)
+    assert chosen is not None
+    assert chosen.name == "identity_source.png"
+
+
+def test_identity_source_falls_back_to_face_primary(tmp_path):
+    refs = tmp_path / "refs"
+    refs.mkdir()
+    (refs / "face_primary.png").write_bytes(b"crop")
+    chosen = _identity_source_path(refs)
+    assert chosen is not None
+    assert chosen.name == "face_primary.png"
+
+
+def test_base_denoise_is_one_without_img2img():
+    assert _base_denoise({}, img2img=False) == 1.0
+    assert _base_denoise({"identity_denoise": 0.4}, img2img=False) == 1.0
+
+
+def test_base_denoise_clamps_img2img_range():
+    assert _base_denoise({}, img2img=True) == 0.58
+    assert _base_denoise({"identity_denoise": 0.2}, img2img=True) == 0.35
+    assert _base_denoise({"identity_denoise": 0.9}, img2img=True) == 0.85
+    assert _base_denoise({"identity_denoise": "nope"}, img2img=True) == 0.58
 
 
 def test_face_ref_falls_back_to_first_image(tmp_path):

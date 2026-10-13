@@ -76,6 +76,13 @@ export type Character = {
     lora_path?: string | null;
     prompt_contract: Record<string, unknown>;
     pipeline_params: Record<string, unknown>;
+    identity_lock?: {
+      asset_id: string;
+      seed?: number | null;
+      face_ref?: string | null;
+      identity_source?: string | null;
+      locked_at?: string | null;
+    } | null;
   } | null;
 };
 
@@ -83,6 +90,8 @@ export type LoraStatus = {
   character_id: string;
   status: string;
   approved_stills: number;
+  matching_stills?: number;
+  likeness_threshold?: number | null;
   dataset_images: number;
   trigger_word: string | null;
   lora_path: string | null;
@@ -292,10 +301,33 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  regenerate: (characterId: string, assetId: string, count = 1) =>
+  lockIdentity: (
+    id: string,
+    body: { asset_id: string; generate_count?: number }
+  ) =>
+    request<{
+      character_id: string;
+      identity_lock: {
+        asset_id: string;
+        seed?: number | null;
+        face_ref?: string | null;
+        identity_source?: string | null;
+      };
+      character: Character;
+      job: Job | null;
+    }>(`/api/characters/${id}/identity-lock`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  unlockIdentity: (id: string) =>
+    request<{ character_id: string; identity_lock: null; character: Character }>(
+      `/api/characters/${id}/identity-lock`,
+      { method: "DELETE" }
+    ),
+  regenerate: (characterId: string, assetId: string, count = 1, moreLike = false) =>
     request<Job>(`/api/characters/${characterId}/assets/${assetId}/regenerate`, {
       method: "POST",
-      body: JSON.stringify({ count }),
+      body: JSON.stringify({ count, more_like: moreLike }),
     }),
   loraStatus: (id: string) => request<LoraStatus>(`/api/characters/${id}/lora/status`),
   buildDataset: (id: string, body?: { decision?: string; min_images?: number }) =>
@@ -377,10 +409,10 @@ export const api = {
     request<Asset[]>(
       `/api/characters/${characterId}/assets${decision ? `?decision=${decision}` : ""}`
     ),
-  setDecision: (assetId: string, decision: string) =>
+  setDecision: (assetId: string, decision: string, force = false) =>
     request(`/api/assets/${assetId}/decision`, {
       method: "POST",
-      body: JSON.stringify({ decision }),
+      body: JSON.stringify({ decision, force }),
     }),
   deleteAsset: (assetId: string, deleteFiles = true) =>
     request<{ id: string; deleted: boolean; character_id: string; files_removed: number }>(

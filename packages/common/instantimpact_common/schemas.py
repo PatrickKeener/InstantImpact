@@ -111,8 +111,12 @@ class FluxPipelineParams(BaseModel):
     hires_scheduler: str = "simple"
     ip_adapter_strength: float = 0.6
     pulid_strength: float = 0.7
-    # Filename in ComfyUI/models/pulid. Empty = PuLID subgraph is dropped.
+    # Filename in ComfyUI/models/pulid. Empty = auto-discover on expand when
+    # weights exist and Comfy has ApplyPulidFlux; otherwise the subgraph drops.
     pulid_model_name: str | None = None
+    # Base-sampler denoise when expand img2img encodes the locked still.
+    # Hunt / txt2img always binds 1.0. Clamped 0.35–0.85 in the worker.
+    identity_denoise: float = 0.58
     # Distilled Flux.1-dev must stay at cfg 1.0 (negatives are inert).
     # De-distilled Flux-arch finetunes should use ~3–4 so NEGATIVE_PROMPT bites.
     steps: int = 28

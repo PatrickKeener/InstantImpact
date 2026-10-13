@@ -12,6 +12,25 @@ class SeedGalleryRequest(BaseModel):
     count: int = Field(default=8, ge=1, le=40)
     themes: list[str] = Field(default_factory=lambda: ["portrait", "casual_bedroom", "glamour"])
     aspect_ratio: str = "4:5"
+    seed: int | None = Field(default=None, description="Optional base seed")
+    seed_policy: str | None = Field(
+        default=None,
+        description="random | same | fixed_base. Empty = random (expand holds identity via img2img).",
+    )
+    mode: str | None = Field(
+        default=None,
+        description="hunt = new random faces; expand = more of the locked face. Empty = auto.",
+    )
+
+
+class IdentityLockRequest(BaseModel):
+    asset_id: str
+    generate_count: int = Field(
+        default=0,
+        ge=0,
+        le=40,
+        description="If > 0, enqueue an expand seed gallery after locking",
+    )
 
 
 class StillBatchRequest(BaseModel):
@@ -111,6 +130,10 @@ class AssetDecisionRequest(BaseModel):
     decision: str  # approved | rejected | pending
     score: int | None = Field(default=None, ge=1, le=5)
     notes: str | None = None
+    force: bool = Field(
+        default=False,
+        description="Approve a still below the likeness gate for the locked face",
+    )
 
 
 class AssetDeleteResponse(BaseModel):
@@ -149,6 +172,10 @@ class GpuStatusOut(BaseModel):
 
 class RegenerateAssetRequest(BaseModel):
     count: int = Field(default=1, ge=1, le=8)
+    more_like: bool = Field(
+        default=False,
+        description="Lock this still as the face and generate pose/outfit variations with the same seed",
+    )
 
 
 class ApprovedSetCreateRequest(BaseModel):

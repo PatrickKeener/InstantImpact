@@ -25,6 +25,7 @@ CORE_NODES = (
     "EmptyLatentImage",
     "SaveImage",
     "LoraLoader",
+    "LoadImage",
     "ImageScale",
     "ImageUpscaleWithModel",
     "UpscaleModelLoader",
@@ -83,6 +84,32 @@ def resolve_comfy_root(*candidates: str | Path | None) -> Path | None:
         if (resolved / "main.py").is_file() or (resolved / "models").is_dir():
             return resolved
     return None
+
+
+def discover_pulid_model(comfy_root: Path | None) -> str | None:
+    """First pulid*.safetensors filename under models/pulid, preferring *flux*."""
+    if not comfy_root:
+        return None
+    hits: list[Path] = []
+    for rel in KIND_DIRS.get("pulid", ("models/pulid",)):
+        folder = comfy_root / rel
+        if not folder.is_dir():
+            continue
+        try:
+            entries = list(folder.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if (
+                entry.is_file()
+                and entry.suffix.lower() == ".safetensors"
+                and "pulid" in entry.name.lower()
+            ):
+                hits.append(entry)
+    if not hits:
+        return None
+    hits.sort(key=lambda p: (0 if "flux" in p.name.lower() else 1, p.name.lower()))
+    return hits[0].name
 
 
 def find_model(comfy_root: Path | None, kind: str, filename: str) -> Path | None:

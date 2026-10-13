@@ -113,6 +113,7 @@ class CharacterVersionOut(BaseModel):
     ref_pack_path: str | None
     prompt_contract: dict[str, Any]
     pipeline_params: dict[str, Any]
+    identity_lock: dict[str, Any] | None = None
     locked_at: datetime | None
 
     model_config = {"from_attributes": True}

@@ -4,7 +4,7 @@
     "description": "Flux FP8 still with CLIPTextEncodeFlux: CLIP-L gets shot intent, T5 gets the full prompt. KSampler CFG remains 1.0.",
     "required_custom_nodes": ["PulidFluxModelLoader", "PulidFluxEvaClipLoader", "PulidFluxInsightFaceLoader", "ApplyPulidFlux"],
     "checkpoint": "flux1-dev-fp8.safetensors (ComfyUI/models/checkpoints/)",
-    "note": "Node 12 is an optional anatomy/realism LoRA. Nodes 15-19 + 14 are the pixel hi-res pass (decode, optional upscale model, lanczos, encode, low denoise). Nodes 30-34 are optional PuLID-Flux. The worker drops whichever are not configured. required_custom_nodes apply only when PuLID is enabled."
+    "note": "Node 12 is an optional anatomy/realism LoRA. Nodes 15-19 + 14 are the pixel hi-res pass. Nodes 30-34 are optional PuLID-Flux. Nodes 40-42 img2img from a locked still (LoadImage → scale → encode); sampler 3 denoise is BASE_DENOISE (1.0 when dropped). The worker drops unused stages. required_custom_nodes apply only when PuLID is enabled."
   },
   "4": {
     "class_type": "CheckpointLoaderSimple",
@@ -81,6 +81,29 @@
       "batch_size": 1
     }
   },
+  "40": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{IDENTITY_IMAGE}}"
+    }
+  },
+  "41": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "upscale_method": "lanczos",
+      "width": "{{WIDTH}}",
+      "height": "{{HEIGHT}}",
+      "crop": "center",
+      "image": ["40", 0]
+    }
+  },
+  "42": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": ["41", 0],
+      "vae": ["4", 2]
+    }
+  },
   "3": {
     "class_type": "KSampler",
     "inputs": {
@@ -89,11 +112,11 @@
       "cfg": "{{CFG}}",
       "sampler_name": "{{SAMPLER_NAME}}",
       "scheduler": "{{SCHEDULER}}",
-      "denoise": 1.0,
+      "denoise": "{{BASE_DENOISE}}",
       "model": ["34", 0],
       "positive": ["6", 0],
       "negative": ["7", 0],
-      "latent_image": ["5", 0]
+      "latent_image": ["42", 0]
     }
   },
   "15": {

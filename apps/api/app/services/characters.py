@@ -72,6 +72,9 @@ def version_to_dict(v: CharacterVersion) -> dict:
         "ref_pack_path": v.ref_pack_path,
         "prompt_contract": v.prompt_contract_json or {},
         "pipeline_params": v.pipeline_params_json or {},
+        "identity_lock": (v.pipeline_params_json or {}).get("identity_lock")
+        if isinstance((v.pipeline_params_json or {}).get("identity_lock"), dict)
+        else None,
         "locked_at": v.locked_at,
     }
 

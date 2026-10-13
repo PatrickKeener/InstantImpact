@@ -2,7 +2,12 @@ from pathlib import Path
 
 from PIL import Image
 
-from instantimpact_common.similarity import best_ref_similarity, face_similarity, similarity_score
+from instantimpact_common.similarity import (
+    best_ref_similarity,
+    crop_face_image,
+    face_similarity,
+    similarity_score,
+)
 
 
 def test_identical_images_score_one(tmp_path: Path):
@@ -45,3 +50,15 @@ def test_best_ref_prefers_face_primary(tmp_path: Path):
     score = best_ref_similarity(still, refs)
     assert score is not None
     assert score > 0.9
+
+
+def test_crop_face_image_uses_upper_center_box(tmp_path: Path):
+    src = tmp_path / "full.png"
+    dest = tmp_path / "face.png"
+    Image.new("RGB", (400, 500), color=(30, 30, 40)).save(src)
+    crop_face_image(src, dest)
+    cropped = Image.open(dest)
+    full = Image.open(src)
+    assert cropped.size[0] < full.size[0]
+    assert cropped.size[1] < full.size[1]
+    assert dest.is_file()

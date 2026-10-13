@@ -19,6 +19,7 @@ from app.services.characters import (
     character_to_out,
     get_character,
 )
+from app.services import identity as identity_svc
 from app.services.storage import get_layout, write_json
 from instantimpact_common.enums import CharacterStatus
 from instantimpact_prompts.contract import build_prompt_contract
@@ -74,16 +75,21 @@ async def build_training_dataset(
         .order_by(Asset.created_at.desc())
     )
     assets = list((await db.execute(q)).scalars().all())
-    if len(assets) < min_images:
+    layout = get_layout()
+    refs_dir = layout.refs_dir(c.id, version.version_int)
+    lock = identity_svc.read_lock(version)
+    selected, skipped_unlike, skipped_dup = _select_train_stills(
+        assets, refs_dir if lock else None, min_images=min_images
+    )
+    if len(selected) < min_images:
         raise CharacterServiceError(
-            f"Need at least {min_images} {decision} stills to build a dataset "
-            f"(have {len(assets)}). Approve more photo-quality images first.",
+            f"Need at least {min_images} matching {decision} stills to build a dataset "
+            f"(have {len(selected)} after likeness filter, {len(assets)} approved). "
+            "Approve more stills of the locked face first.",
             400,
         )
 
-    layout = get_layout()
     ds_dir = layout.dataset_dir(c.id, version.version_int)
-    refs_dir = layout.refs_dir(c.id, version.version_int)
     lora_dir = layout.lora_dir(c.id, version.version_int)
     for d in (ds_dir, refs_dir, lora_dir):
         d.mkdir(parents=True, exist_ok=True)
@@ -99,7 +105,8 @@ async def build_training_dataset(
 
     copied = 0
     captions: list[dict[str, Any]] = []
-    for i, asset in enumerate(assets):
+    primary_exists = any((refs_dir / n).is_file() for n in ("face_primary.png", "face_primary.jpg", "face_primary.webp"))
+    for i, asset in enumerate(selected):
         src = _safe_data_path(asset.path)
         if not src:
             continue
@@ -116,7 +123,7 @@ async def build_training_dataset(
         if i < 8:
             ref_name = f"ref_{stem}{ext}"
             shutil.copy2(src, refs_dir / ref_name)
-        if i == 0:
+        if i == 0 and not primary_exists:
             shutil.copy2(src, refs_dir / f"face_primary{ext}")
         copied += 1
 
@@ -154,6 +161,9 @@ async def build_training_dataset(
         "image_count": copied,
         "built_at": datetime.now(timezone.utc).isoformat(),
         "decision_filter": decision,
+        "skipped_unlike": skipped_unlike,
+        "skipped_near_dup": skipped_dup,
+        "likeness_threshold": identity_svc.LIKENESS_TRAIN_MIN if lock else None,
     }
     write_json(lora_dir / "train_config.json", train_cfg)
     write_json(ds_dir / "manifest.json", {"trigger": trigger, "items": captions})
@@ -182,7 +192,62 @@ async def build_training_dataset(
             if copied >= 12
             else f"Only {copied} images — aim for 12–30 approved photo stills for a stronger LoRA."
         ),
+        "skipped_unlike": skipped_unlike,
+        "skipped_near_dup": skipped_dup,
     }
+
+
+def _select_train_stills(
+    assets: list[Asset],
+    refs_dir: Path | None,
+    *,
+    min_images: int,
+) -> tuple[list[Asset], int, int]:
+    """Drop unlike stills vs face_primary, then near-dups if the set stays large enough."""
+    if not refs_dir:
+        return list(assets), 0, 0
+    matching: list[Asset] = []
+    skipped_unlike = 0
+    for asset in assets:
+        src = _safe_data_path(asset.path)
+        if not src:
+            continue
+        score = identity_svc.likeness_for_asset(asset, refs_dir)
+        if score is not None and score < identity_svc.LIKENESS_TRAIN_MIN:
+            skipped_unlike += 1
+            continue
+        matching.append(asset)
+
+    kept: list[Asset] = []
+    skipped_dup = 0
+    kept_paths: list[Path] = []
+    for i, asset in enumerate(matching):
+        src = _safe_data_path(asset.path)
+        remaining = len(matching) - i
+        if (
+            src
+            and kept_paths
+            and _is_near_dup(src, kept_paths)
+            and len(kept) + remaining - 1 >= min_images
+        ):
+            skipped_dup += 1
+            continue
+        kept.append(asset)
+        if src:
+            kept_paths.append(src)
+    return kept, skipped_unlike, skipped_dup
+
+
+def _is_near_dup(path: Path, kept: list[Path]) -> bool:
+    try:
+        from instantimpact_common.similarity import face_similarity
+    except Exception:
+        return False
+    for other in kept:
+        score = face_similarity(path, other)
+        if score is not None and score >= identity_svc.LIKENESS_NEAR_DUP:
+            return True
+    return False
 
 
 def _resolve_lora_source(source_path: str, data_root: Path) -> Path | None:
@@ -401,6 +466,16 @@ async def lora_status(db: AsyncSession, character_id: str) -> dict[str, Any]:
         comfy_lora = flux.get("comfy_lora_name")
 
     n_approved = len(approved)
+    lock = identity_svc.read_lock(version)
+    refs_dir = layout.refs_dir(c.id, version.version_int) if version else None
+    matching_stills = n_approved
+    if lock:
+        matching_stills = 0
+        for a in approved:
+            score = identity_svc.likeness_for_asset(a, refs_dir)
+            if score is not None and score < identity_svc.LIKENESS_TRAIN_MIN:
+                continue
+            matching_stills += 1
     coverage_keys = [
         "portrait",
         "casual_bedroom",
@@ -422,6 +497,8 @@ async def lora_status(db: AsyncSession, character_id: str) -> dict[str, Any]:
         "character_id": character_id,
         "status": c.status,
         "approved_stills": n_approved,
+        "matching_stills": matching_stills,
+        "likeness_threshold": identity_svc.LIKENESS_TRAIN_MIN if lock else None,
         "dataset_images": ds_count,
         "trigger_word": version.trigger_word if version else None,
         "lora_path": version.lora_path if version else None,
@@ -430,7 +507,7 @@ async def lora_status(db: AsyncSession, character_id: str) -> dict[str, Any]:
         "train_config": train_cfg,
         "version_id": version.id if version else None,
         "version_int": version.version_int if version else None,
-        "ready_for_dataset": n_approved >= MIN_IMAGES_HARD,
+        "ready_for_dataset": matching_stills >= MIN_IMAGES_HARD,
         "recommended_min": 12,
         "coverage": coverage,
         "coverage_missing": missing,

@@ -5,7 +5,7 @@
     "checkpoint": "flux1-dev-fp8.safetensors",
     "lora": "ComfyUI/models/loras/{{LORA_NAME}}",
     "required_custom_nodes": ["PulidFluxModelLoader", "PulidFluxEvaClipLoader", "PulidFluxInsightFaceLoader", "ApplyPulidFlux"],
-    "note": "Node 12 is an optional anatomy/realism LoRA chained after the character LoRA. Nodes 15-19 + 14 are the pixel hi-res pass. Nodes 30-34 are optional PuLID-Flux. The worker drops whichever are not configured."
+    "note": "Node 12 is an optional anatomy/realism LoRA chained after the character LoRA. Nodes 15-19 + 14 are the pixel hi-res pass. Nodes 30-34 are optional PuLID-Flux. Nodes 40-42 img2img from a locked still; sampler 3 denoise is BASE_DENOISE. The worker drops unused stages."
   },
   "4": {
     "class_type": "CheckpointLoaderSimple",
@@ -92,6 +92,29 @@
       "batch_size": 1
     }
   },
+  "40": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{IDENTITY_IMAGE}}"
+    }
+  },
+  "41": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "upscale_method": "lanczos",
+      "width": "{{WIDTH}}",
+      "height": "{{HEIGHT}}",
+      "crop": "center",
+      "image": ["40", 0]
+    }
+  },
+  "42": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": ["41", 0],
+      "vae": ["4", 2]
+    }
+  },
   "3": {
     "class_type": "KSampler",
     "inputs": {
@@ -100,11 +123,11 @@
       "cfg": "{{CFG}}",
       "sampler_name": "{{SAMPLER_NAME}}",
       "scheduler": "{{SCHEDULER}}",
-      "denoise": 1.0,
+      "denoise": "{{BASE_DENOISE}}",
       "model": ["34", 0],
       "positive": ["6", 0],
       "negative": ["7", 0],
-      "latent_image": ["5", 0]
+      "latent_image": ["42", 0]
     }
   },
   "15": {

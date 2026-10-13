@@ -137,6 +137,17 @@ def drop_pulid(workflow: dict[str, Any]) -> dict[str, Any]:
     return drop_nodes(wf, PULID_SUPPORT_NODE_IDS)
 
 
+def drop_identity_img2img(workflow: dict[str, Any]) -> dict[str, Any]:
+    """txt2img: the base sampler reads EmptyLatentImage instead of the encoded still."""
+    wf = copy.deepcopy(workflow)
+    sampler = wf.get(BASE_SAMPLER_NODE_ID)
+    if isinstance(sampler, dict):
+        inputs = dict(sampler.get("inputs") or {})
+        inputs["latent_image"] = [EMPTY_LATENT_NODE_ID, 0]
+        sampler["inputs"] = inputs
+    return drop_nodes(wf, IDENTITY_IMG2IMG_NODE_IDS)
+
+
 # Required keys for flux_still_character_v1 (CheckpointLoaderSimple / FP8 path)
 FLUX_STILL_REQUIRED_VARS = {
     "CKPT_NAME",
@@ -152,6 +163,8 @@ FLUX_STILL_REQUIRED_VARS = {
     "SAMPLER_NAME",
     "SCHEDULER",
     "FILENAME_PREFIX",
+    # Always on sampler 3. Hunt/txt2img binds 1.0; expand img2img binds ~0.58.
+    "BASE_DENOISE",
 }
 
 # Base + character LoRA (clip strength is lower so the shot request is not overwritten)
@@ -218,3 +231,10 @@ PULID_VARS = {
     "PULID_PROVIDER",
     "FACE_REF_IMAGE",
 }
+
+# Optional img2img from the locked still (full frame, not the tight face crop).
+# LoadImage 40 is separate from PuLID's LoadImage 33 so drop_pulid cannot
+# steal the identity latent. EmptyLatentImage 5 stays in the graph.
+EMPTY_LATENT_NODE_ID = "5"
+IDENTITY_IMG2IMG_NODE_IDS = ("40", "41", "42")
+IDENTITY_IMG2IMG_VARS = {"IDENTITY_IMAGE"}

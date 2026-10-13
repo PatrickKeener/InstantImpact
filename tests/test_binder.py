@@ -178,6 +178,35 @@ def test_pulid_patches_model_after_detail_lora():
     assert PULID_VARS <= extract_placeholders(wf)
 
 
+def test_dropping_identity_img2img_rewires_sampler_to_empty_latent():
+    from instantimpact_comfy.binder import (
+        FLUX_STILL_REQUIRED_VARS,
+        drop_identity_img2img,
+        extract_placeholders,
+    )
+
+    root = Path(__file__).resolve().parents[1]
+    wf = drop_identity_img2img(load_workflow(root / "workflows" / "flux_still_character_v1.json"))
+    assert "40" not in wf and "41" not in wf and "42" not in wf
+    assert wf["3"]["inputs"]["latent_image"] == ["5", 0]
+    assert wf["5"]["class_type"] == "EmptyLatentImage"
+    placeholders = extract_placeholders(wf)
+    assert "IDENTITY_IMAGE" not in placeholders
+    assert "BASE_DENOISE" in placeholders
+    assert validate_placeholders(wf, FLUX_STILL_REQUIRED_VARS) == []
+
+
+def test_identity_img2img_encodes_from_load_image():
+    root = Path(__file__).resolve().parents[1]
+    wf = load_workflow(root / "workflows" / "flux_still_character_v1.json")
+    assert wf["40"]["class_type"] == "LoadImage"
+    assert wf["40"]["inputs"]["image"] == "{{IDENTITY_IMAGE}}"
+    assert wf["42"]["class_type"] == "VAEEncode"
+    assert wf["42"]["inputs"]["vae"] == ["4", 2]
+    assert wf["3"]["inputs"]["latent_image"] == ["42", 0]
+    assert wf["3"]["inputs"]["denoise"] == "{{BASE_DENOISE}}"
+
+
 def test_dropping_pulid_rewires_samplers_to_detail_lora():
     from instantimpact_comfy.binder import (
         DETAIL_LORA_NODE_ID,

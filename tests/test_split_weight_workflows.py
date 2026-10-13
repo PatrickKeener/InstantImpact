@@ -17,11 +17,13 @@ from instantimpact_comfy.binder import (
     FLUX_STILL_SPLIT_LORA_REQUIRED_VARS,
     FLUX_STILL_SPLIT_REQUIRED_VARS,
     HIRES_VARS,
+    IDENTITY_IMG2IMG_VARS,
     PULID_VARS,
     UPSCALE_MODEL_VARS,
     bind_workflow,
     bypass_node,
     drop_hires_subgraph,
+    drop_identity_img2img,
     drop_pulid,
     load_workflow,
     nodes_only,
@@ -44,7 +46,9 @@ BASE_VARS = {
     "SAMPLER_NAME": "euler",
     "SCHEDULER": "simple",
     "FILENAME_PREFIX": "ii_test_000",
+    "BASE_DENOISE": 0.58,
 }
+IDENTITY_VALUES = {"IDENTITY_IMAGE": "ii_identity_test.png"}
 LORA_VARS = {"LORA_NAME": "zoe.safetensors", "LORA_STRENGTH": 0.85, "LORA_CLIP_STRENGTH": 0.55}
 DETAIL_VARS = {"DETAIL_LORA_NAME": "detail.safetensors", "DETAIL_LORA_STRENGTH": 0.6}
 HIRES_VALUES = {
@@ -78,7 +82,13 @@ def test_split_template_binds_with_every_optional_stage(name, required, extra):
     template = load_workflow(WORKFLOWS / name)
     assert (
         validate_placeholders(
-            template, required | DETAIL_LORA_VARS | HIRES_VARS | UPSCALE_MODEL_VARS | PULID_VARS
+            template,
+            required
+            | DETAIL_LORA_VARS
+            | HIRES_VARS
+            | UPSCALE_MODEL_VARS
+            | PULID_VARS
+            | IDENTITY_IMG2IMG_VARS,
         )
         == []
     )
@@ -93,6 +103,7 @@ def test_split_template_binds_with_every_optional_stage(name, required, extra):
                 **HIRES_VALUES,
                 **UPSCALE_VALUES,
                 **PULID_VALUES,
+                **IDENTITY_VALUES,
                 **_split_weight_vars(),
             },
         )
@@ -103,6 +114,8 @@ def test_split_template_binds_with_every_optional_stage(name, required, extra):
     assert graph["18"]["class_type"] == "ImageScale"
     assert graph["19"]["inputs"]["vae"] == ["22", 0]
     assert graph["3"]["inputs"]["model"] == ["34", 0]
+    assert graph["3"]["inputs"]["latent_image"] == ["42", 0]
+    assert graph["42"]["inputs"]["vae"] == ["22", 0]
     assert graph["34"]["class_type"] == "ApplyPulidFlux"
     # CheckpointLoaderSimple's null clip is the whole reason this path exists.
     assert not any(n["class_type"] == "CheckpointLoaderSimple" for n in graph.values())
@@ -125,10 +138,13 @@ def test_split_template_binds_with_detail_lora_and_hires_bypassed(name, required
     template = bypass_node(template, DETAIL_LORA_NODE_ID, DETAIL_LORA_OUTPUTS)
     template = drop_pulid(template)
     template = drop_hires_subgraph(template)
+    template = drop_identity_img2img(template)
     assert validate_placeholders(template, required) == []
 
     graph = nodes_only(bind_workflow(template, {**BASE_VARS, **extra, **_split_weight_vars()}))
     assert DETAIL_LORA_NODE_ID not in graph
+    assert "40" not in graph and "42" not in graph
+    assert graph["3"]["inputs"]["latent_image"] == ["5", 0]
     assert graph["8"]["inputs"]["samples"] == ["3", 0]
     # Text encoders fall back to the loader (or character LoRA) that fed node 12.
     expected_clip = ["10", 1] if extra else ["21", 0]

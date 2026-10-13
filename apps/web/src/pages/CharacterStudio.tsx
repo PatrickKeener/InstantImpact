@@ -119,6 +119,9 @@ export default function CharacterStudio() {
   const [importConfirm, setImportConfirm] = useState(false);
   const [importApprove, setImportApprove] = useState(false);
   const [assetSort, setAssetSort] = useState<"newest" | "match">("newest");
+  const [approveBlocked, setApproveBlocked] = useState<{ id: string; message: string } | null>(
+    null
+  );
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [setTitle, setSetTitle] = useState("Approved pack");
@@ -156,6 +159,10 @@ export default function CharacterStudio() {
   useEffect(() => {
     if (!fluxDirty) setFluxKnobs(readFluxKnobs(character));
   }, [character, fluxDirty]);
+
+  useEffect(() => {
+    if (character?.current_version?.identity_lock?.asset_id) setAssetSort("match");
+  }, [character?.current_version?.identity_lock?.asset_id]);
 
   const activeJobs = jobs.filter((j) => j.status === "queued" || j.status === "running");
   useEffect(() => {
@@ -218,19 +225,62 @@ export default function CharacterStudio() {
     }
   }
 
-  async function runSeed() {
+  async function runSeed(mode: "hunt" | "expand") {
     if (!id) return;
     setBusy(true);
     setError(null);
+    setInfo(null);
     try {
       const job = await api.seedGallery(id, {
-        count: 6,
-        themes: ["portrait", "glamour", "casual_bedroom"],
+        count: mode === "expand" ? 8 : 6,
+        mode,
+        themes: mode === "hunt" ? ["portrait", "glamour", "casual_bedroom"] : undefined,
       });
       await refresh();
       if (job.status === "failed") {
         setError(job.error_message || "Seed gallery failed");
+      } else {
+        setInfo(
+          mode === "expand"
+            ? "Generating more of the locked face (img2img from the locked still, varied pose/outfit). Approve matches, reject drift."
+            : "Hunting new faces with random seeds. Lock one you like, then generate more of her."
+        );
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function lockFace(assetId: string, generateCount = 0) {
+    if (!id) return;
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const res = await api.lockIdentity(id, { asset_id: assetId, generate_count: generateCount });
+      await refresh();
+      setInfo(
+        generateCount
+          ? `Face locked (seed ${res.identity_lock.seed ?? "—"}). Generating ${generateCount} matching stills.`
+          : `Face locked (seed ${res.identity_lock.seed ?? "—"}). Next seed set will keep this person.`
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unlockFace() {
+    if (!id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.unlockIdentity(id);
+      await refresh();
+      setInfo("Face unlocked. Seed sets will hunt new people until you lock one again.");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -361,9 +411,19 @@ export default function CharacterStudio() {
     }
   }
 
-  async function decide(assetId: string, decision: string) {
-    await api.setDecision(assetId, decision);
-    await refresh();
+  async function decide(assetId: string, decision: string, force = false) {
+    setError(null);
+    try {
+      await api.setDecision(assetId, decision, force);
+      setApproveBlocked(null);
+      await refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (decision === "approved" && msg.startsWith("409")) {
+        setApproveBlocked({ id: assetId, message: msg });
+      }
+      setError(msg);
+    }
   }
 
   async function removeAsset(assetId: string) {
@@ -523,9 +583,16 @@ export default function CharacterStudio() {
 
   const unlocked = character.status === "bootstrap" || character.status === "draft";
   const approvedCount = assets.filter((a) => a.decision === "approved").length;
+  const matchingCount = lora?.matching_stills ?? approvedCount;
   const hasLora = Boolean(lora?.lora_file_present || lora?.comfy_lora_name);
   const trainJob = jobs.find((j) => j.type === "lora_train");
   const lbAsset = lightbox !== null ? visible[lightbox] : null;
+  const identityLock = character.current_version?.identity_lock?.asset_id
+    ? character.current_version.identity_lock
+    : null;
+  const lockedAsset = identityLock
+    ? assets.find((a) => a.id === identityLock.asset_id) || null
+    : null;
 
   return (
     <div className="space-y-6">
@@ -566,7 +633,9 @@ export default function CharacterStudio() {
             <span className="capitalize text-slate-200">{character.status}</span>
             {unlocked && (
               <span className="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-200">
-                Unlocked / bootstrap path — identity will drift until LoRA lock
+                {identityLock
+                  ? "Face locked — generate more of her, then train LoRA"
+                  : "No face lock yet — each random seed set is a new person"}
               </span>
             )}
             {character.status === "ready" && (
@@ -591,6 +660,19 @@ export default function CharacterStudio() {
       {info && (
         <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-100">
           {info}
+        </div>
+      )}
+      {approveBlocked && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-950/30 px-4 py-3 text-sm text-amber-100">
+          <span className="flex-1">{approveBlocked.message.replace(/^\d+\s+/, "")}</span>
+          <button
+            type="button"
+            className="btn-ghost text-xs"
+            disabled={busy}
+            onClick={() => void decide(approveBlocked.id, "approved", true)}
+          >
+            Approve anyway
+          </button>
         </div>
       )}
 
@@ -627,16 +709,50 @@ export default function CharacterStudio() {
         <section className="card space-y-4 p-5">
           <h2 className="font-display text-xl">Seed gallery</h2>
           <p className="text-sm text-slate-400">
-            Generate reference candidates. Approve the most photoreal, consistent faces for LoRA
-            training.
+            Flux invents a new person on every random seed. Hunt until you like a face, lock it,
+            then generate more of that same person (img2img from the locked still) until you have
+            12–30 matching stills for LoRA.
           </p>
-          <button className="btn-primary" disabled={busy} onClick={() => void runSeed()}>
-            Generate seed set (6)
-          </button>
+          {identityLock ? (
+            <div className="flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-3">
+              {(lockedAsset?.thumb_path || identityLock.face_ref) && (
+                <img
+                  src={api.mediaUrl(lockedAsset?.thumb_path || identityLock.face_ref || "")}
+                  alt=""
+                  className="h-16 w-12 rounded-lg object-cover"
+                />
+              )}
+              <div className="min-w-0 flex-1 text-xs">
+                <div className="font-medium text-emerald-100">Face locked</div>
+                <div className="font-mono text-slate-400">seed {identityLock.seed ?? "—"}</div>
+              </div>
+              <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => void unlockFace()}>
+                Unlock
+              </button>
+            </div>
+          ) : (
+            <p className="text-xs text-amber-200/90">
+              Open a still → <strong>Lock this face</strong>. Approving the first still also locks it.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="btn-primary"
+              disabled={busy}
+              onClick={() => void runSeed(identityLock ? "expand" : "hunt")}
+            >
+              {identityLock ? "More of this face (8)" : "Hunt faces (6)"}
+            </button>
+            {identityLock && (
+              <button className="btn-ghost" disabled={busy} onClick={() => void runSeed("hunt")}>
+                Hunt new faces (6)
+              </button>
+            )}
+          </div>
           <div className="space-y-2 rounded-xl border border-white/10 p-3">
             <p className="text-xs text-slate-400">
-              Or upload stills from another AI tool. They land in Outputs for approve/reject, then
-              LoRA train uses approved ones.
+              Or upload stills from another AI tool. Lock one after import. Expand then img2imgs
+              the locked still; PuLID auto-enables when weights exist under Comfy models/pulid.
             </p>
             <label className="flex gap-2 text-xs text-slate-300">
               <input
@@ -1004,15 +1120,17 @@ export default function CharacterStudio() {
         <p className="text-xs text-slate-500">
           Identity drift after the second pass: lower hi-res denoise to 0.25–0.35 before raising
           character LoRA strength. Empty upscale model uses lanczos (still sharper than latent
-          nearest-exact). PuLID stays off until a model filename is set and a face ref exists.
+          nearest-exact). After a face lock, expand img2imgs the locked still. PuLID auto-enables
+          on expand when weights exist under models/pulid; a filename here forces it on.
         </p>
       </section>
 
       <section className="card space-y-4 p-5">
         <h2 className="font-display text-xl">Identity LoRA</h2>
         <p className="text-sm text-slate-400">
-          Lock face/body consistency: approve 12–30 photo-quality stills, then train on this machine
-          (Ostris AI Toolkit on the L40S). The worker registers the LoRA when training finishes.
+          Lock a face in Seed gallery, approve 12–30 matching photo stills, then train on this
+          machine (Ostris AI Toolkit on the L40S). Stills below the likeness gate stay out of the
+          train set unless you force-approve.
         </p>
         <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl bg-white/5 px-3 py-2">
@@ -1025,6 +1143,20 @@ export default function CharacterStudio() {
               </span>
             </div>
           </div>
+          {identityLock && (
+            <div className="rounded-xl bg-white/5 px-3 py-2">
+              <div className="text-xs text-slate-500">Matching locked face</div>
+              <div className="text-lg font-semibold">
+                {lora?.matching_stills ?? approvedCount}
+                {lora?.likeness_threshold != null && (
+                  <span className="text-xs font-normal text-slate-500">
+                    {" "}
+                    ≥ {Math.round(lora.likeness_threshold * 100)}%
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
           <div className="rounded-xl bg-white/5 px-3 py-2">
             <div className="text-xs text-slate-500">Dataset images</div>
             <div className="text-lg font-semibold">{lora?.dataset_images ?? 0}</div>
@@ -1078,7 +1210,7 @@ export default function CharacterStudio() {
           <button
             type="button"
             className="btn-primary"
-            disabled={busy || approvedCount < 4}
+            disabled={busy || matchingCount < 4}
             onClick={() => void trainAndRegister()}
           >
             Train LoRA & register
@@ -1086,7 +1218,7 @@ export default function CharacterStudio() {
           <button
             type="button"
             className="btn-ghost"
-            disabled={busy || approvedCount < 4}
+            disabled={busy || matchingCount < 4}
             onClick={() => void buildDataset()}
           >
             Build dataset only
@@ -1158,7 +1290,10 @@ cd /home/pkeener/InstantImpact/apps/worker
           </div>
         </div>
         <ol className="list-decimal space-y-1 pl-5 text-xs text-slate-500">
-          <li>Approve photoreal stills (reject cartoons / bad faces). Aim for coverage badges above.</li>
+          <li>
+            Hunt a face, lock it, then approve matching stills (reject cartoons / other people).
+            Train uses stills at or above the likeness gate. Aim for coverage badges above.
+          </li>
           <li>
             Click <strong>Train LoRA & register</strong> (builds dataset, trains on the GPU worker, copies
             weights into Comfy). Training takes ~20–90 minutes; stills wait on the GPU lock.
@@ -1381,6 +1516,11 @@ cd /home/pkeener/InstantImpact/apps/worker
                     imported
                   </span>
                 ) : null}
+                {identityLock?.asset_id === a.id ? (
+                  <span className="absolute right-1 top-1 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-white">
+                    face lock
+                  </span>
+                ) : null}
               </button>
               <div className="space-y-2 p-2">
                 <label className="flex items-center gap-2 text-[10px] text-slate-500">
@@ -1394,7 +1534,13 @@ cd /home/pkeener/InstantImpact/apps/worker
                     <span className="rounded bg-emerald-500/15 px-1 text-emerald-200">caption</span>
                   ) : null}
                   {a.consistency_score != null && (
-                    <span className="ml-auto text-accent-soft">
+                    <span
+                      className={`ml-auto ${
+                        identityLock && a.consistency_score < 0.45
+                          ? "text-amber-300"
+                          : "text-accent-soft"
+                      }`}
+                    >
                       {(a.consistency_score * 100).toFixed(0)}%
                     </span>
                   )}
@@ -1405,6 +1551,15 @@ cd /home/pkeener/InstantImpact/apps/worker
                   </p>
                 )}
                 <div className="flex gap-1">
+                  <button
+                    type="button"
+                    className="btn-ghost flex-1 px-1 py-1 text-[10px]"
+                    disabled={busy}
+                    onClick={() => void lockFace(a.id)}
+                    title="Lock this face"
+                  >
+                    lock
+                  </button>
                   <button
                     type="button"
                     className="btn-ghost flex-1 px-1 py-1 text-[10px]"
@@ -1501,11 +1656,23 @@ cd /home/pkeener/InstantImpact/apps/worker
             onClick={(e) => e.stopPropagation()}
           >
             <div className="grid gap-4 md:grid-cols-2">
-              <img
-                src={api.mediaUrl(lbAsset.path)}
-                alt=""
-                className="w-full rounded-xl object-contain"
-              />
+              <div className="relative">
+                <img
+                  src={api.mediaUrl(lbAsset.path)}
+                  alt=""
+                  className="w-full rounded-xl object-contain"
+                />
+                {identityLock && (identityLock.face_ref || lockedAsset?.thumb_path) && (
+                  <div className="absolute bottom-2 left-2 flex items-center gap-2 rounded-lg bg-black/75 p-1.5">
+                    <img
+                      src={api.mediaUrl(identityLock.face_ref || lockedAsset?.thumb_path || "")}
+                      alt=""
+                      className="h-16 w-12 rounded object-cover"
+                    />
+                    <span className="pr-1 text-[10px] text-emerald-100">locked face</span>
+                  </div>
+                )}
+              </div>
               <div className="space-y-3 text-sm">
                 <div className="text-xs uppercase text-slate-500">
                   {lightbox + 1} / {visible.length} · {lbAsset.decision}
@@ -1513,11 +1680,26 @@ cd /home/pkeener/InstantImpact/apps/worker
                 <div>
                   Seed <span className="font-mono">{lbAsset.seed ?? "—"}</span>
                   {lbAsset.consistency_score != null && (
-                    <span className="ml-2 text-accent-soft">
+                    <span
+                      className={`ml-2 ${
+                        identityLock && lbAsset.consistency_score < 0.45
+                          ? "text-amber-300"
+                          : "text-accent-soft"
+                      }`}
+                    >
                       ref similarity {(lbAsset.consistency_score * 100).toFixed(0)}%
                     </span>
                   )}
                 </div>
+                {identityLock &&
+                  lbAsset.consistency_score != null &&
+                  lbAsset.consistency_score < 0.45 &&
+                  identityLock.asset_id !== lbAsset.id && (
+                    <p className="text-xs text-amber-200">
+                      Low match to the locked face. Reject unless this is still her, then Approve
+                      anyway.
+                    </p>
+                  )}
                 <div>
                   <div className="text-xs text-emerald-400">Positive</div>
                   <p className="mt-1 text-xs text-slate-300">{lbAsset.prompt_positive || "—"}</p>
@@ -1530,8 +1712,30 @@ cd /home/pkeener/InstantImpact/apps/worker
                   <button className="btn-primary text-xs" onClick={() => void decide(lbAsset.id, "approved")}>
                     Approve (A)
                   </button>
+                  {approveBlocked?.id === lbAsset.id && (
+                    <button
+                      className="btn-ghost text-xs text-amber-200"
+                      onClick={() => void decide(lbAsset.id, "approved", true)}
+                    >
+                      Approve anyway
+                    </button>
+                  )}
                   <button className="btn-ghost text-xs" onClick={() => void decide(lbAsset.id, "rejected")}>
                     Reject (R)
+                  </button>
+                  <button
+                    className="btn-primary text-xs"
+                    disabled={busy || !id}
+                    onClick={() => void lockFace(lbAsset.id, 8)}
+                  >
+                    Lock face + generate 8
+                  </button>
+                  <button
+                    className="btn-ghost text-xs"
+                    disabled={busy || !id}
+                    onClick={() => void lockFace(lbAsset.id)}
+                  >
+                    Lock this face
                   </button>
                   <button
                     className="btn-ghost text-xs"

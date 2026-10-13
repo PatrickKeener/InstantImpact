@@ -2,6 +2,7 @@ from pathlib import Path
 
 from instantimpact_common.flux_inventory import (
     FluxRuntime,
+    discover_pulid_model,
     fail_closed_message,
     find_model,
     inspect_flux_still,
@@ -122,6 +123,13 @@ def test_split_missing_unet_is_missing_weights(tmp_path: Path):
 def test_find_model_searches_text_encoders(tmp_path: Path):
     path = _touch(tmp_path, "models/text_encoders/clip_l.safetensors")
     assert find_model(tmp_path, "clip", "clip_l.safetensors") == path
+
+
+def test_discover_pulid_model_prefers_flux_weights(tmp_path: Path):
+    _touch(tmp_path, "models/pulid/pulid_v1.safetensors")
+    _touch(tmp_path, "models/pulid/pulid_flux_v0.9.1.safetensors")
+    assert discover_pulid_model(tmp_path) == "pulid_flux_v0.9.1.safetensors"
+    assert discover_pulid_model(tmp_path / "missing") is None
 
 
 def test_find_model_walks_models_tree(tmp_path: Path):
