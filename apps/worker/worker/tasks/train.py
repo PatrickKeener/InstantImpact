@@ -129,9 +129,8 @@ async def _run_train(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
                 "event": "failed",
                 "error_code": "no_cuda",
                 "message": (
-                    "LoRA train needs a native CUDA worker. "
-                    "docker stop instantimpact-worker ; "
-                    "cd /home/pkeener/InstantImpact/apps/worker && ../../.venv/bin/python -m worker.main"
+                    "LoRA train needs the native CUDA worker. "
+                    "On nemesis run: bash scripts/ii start"
                 ),
             },
         )
@@ -268,6 +267,41 @@ async def _run_train(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     dest.parent.mkdir(parents=True, exist_ok=True)
     if weights.resolve() != dest.resolve():
         shutil.copy2(weights, dest)
+
+    slug = meta.get("slug")
+    version_int = meta.get("version_int")
+    if slug and version_int is not None:
+        from instantimpact_common.lora_comfy import comfy_lora_filename, install_character_lora
+
+        loras_dir = Path(
+            os.environ.get("INSTANTIMPACT_COMFY_LORAS_DIR")
+            or (Path.home() / "ComfyUI" / "models" / "loras")
+        )
+        comfy_name = comfy_lora_filename(str(slug), int(version_int))
+        try:
+            installed = install_character_lora(dest, loras_dir, comfy_name)
+        except OSError as exc:
+            await _publish(
+                redis,
+                {
+                    "job_id": job_id,
+                    "event": "failed",
+                    "error_code": "lora_install_failed",
+                    "message": (
+                        f"Training wrote {dest} but could not install {comfy_name} "
+                        f"into {loras_dir}: {exc}"
+                    ),
+                },
+            )
+            return {"ok": False}
+        await _publish(
+            redis,
+            {
+                "job_id": job_id,
+                "event": "log",
+                "message": f"Installed Comfy LoRA {installed}",
+            },
+        )
 
     rel = meta.get("dest_rel") or str(dest)
     await _publish(

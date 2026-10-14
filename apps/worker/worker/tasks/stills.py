@@ -413,6 +413,26 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         if lp.endswith(".safetensors"):
             lora_name = Path(lp).name
 
+    if lora_name:
+        from instantimpact_common.lora_comfy import ensure_character_lora
+
+        missing_lora = ensure_character_lora(
+            lora_name,
+            _resolve_lora_source(snapshot.get("lora_path")),
+            os.environ.get("INSTANTIMPACT_COMFY_LORAS_DIR"),
+        )
+        if missing_lora:
+            await _publish(
+                redis,
+                {
+                    "job_id": job_id,
+                    "event": "failed",
+                    "error_code": "missing_character_lora",
+                    "message": missing_lora,
+                },
+            )
+            return {"ok": False}
+
     comfy_url = os.environ.get("INSTANTIMPACT_COMFY_URL", "http://127.0.0.1:8188")
     strict = os.environ.get("INSTANTIMPACT_STRICT_OFFLINE", "").lower() in {"1", "true", "yes"}
     try:
@@ -832,6 +852,19 @@ def _resolve_data_dir(request_path: Path) -> Path:
         return Path(env).resolve()
     # request.json lives at data/jobs/{id}/request.json → parents[2] == data/
     return request_path.resolve().parents[2]
+
+
+def _resolve_lora_source(raw: Any) -> Path | None:
+    if not raw:
+        return None
+    path = Path(str(raw)).expanduser()
+    if path.is_file():
+        return path
+    data = os.environ.get("INSTANTIMPACT_DATA_DIR")
+    if not data:
+        return None
+    candidate = Path(data).expanduser() / str(raw)
+    return candidate if candidate.is_file() else None
 
 
 def _size_for_aspect(aspect: str, flux_params: dict) -> tuple[int, int]:

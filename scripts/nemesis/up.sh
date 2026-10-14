@@ -50,6 +50,7 @@ fi
 if [[ ! -f "${ROOT}/.env" ]]; then
   echo "WARN: no .env — copying .env.nemesis.example"
   cp "${ROOT}/.env.nemesis.example" "${ROOT}/.env"
+  load_dotenv
   echo "  Edit ${ROOT}/.env and set INSTANTIMPACT_API_TOKEN before using the UI."
 fi
 
@@ -57,32 +58,9 @@ if [[ "$STOP_VLLM" -eq 1 ]]; then
   stop_vllm_if_requested
 fi
 
-stop_compose_app_containers
-
-# Redis
-if redis_ok; then
-  echo "  · redis OK"
-else
-  echo "  → redis not responding — trying docker redis (instantimpact-redis)"
-  if command -v docker >/dev/null 2>&1; then
-    if docker ps -a --format '{{.Names}}' | grep -qx instantimpact-redis; then
-      docker start instantimpact-redis >/dev/null
-    else
-      docker run -d --name instantimpact-redis --restart unless-stopped \
-        -p 127.0.0.1:6379:6379 redis:7-alpine >/dev/null
-    fi
-    sleep 1
-    if redis_ok; then
-      echo "    redis up via docker"
-    else
-      echo "ERROR: could not start redis. Install redis-server or fix Docker."
-      exit 1
-    fi
-  else
-    echo "ERROR: redis not running. Install: sudo apt install -y redis-server"
-    exit 1
-  fi
-fi
+validate_native_config
+disable_compose_app_stack
+ensure_redis
 
 # Comfy (optional start)
 if [[ "$WITH_COMFY" -eq 1 ]]; then
@@ -102,44 +80,8 @@ if [[ "$FORCE_MOCK" -eq 1 ]]; then
   echo "  · mock generation forced for this session"
 fi
 
-export INSTANTIMPACT_REDIS_URL="$REDIS_URL"
-export INSTANTIMPACT_COMFY_URL="$COMFY_URL"
-export INSTANTIMPACT_COMFY_CKPT_NAME="$COMFY_CKPT"
-export INSTANTIMPACT_DATA_DIR="${INSTANTIMPACT_DATA_DIR:-${ROOT}/data}"
-export INSTANTIMPACT_WORKFLOWS_DIR="${INSTANTIMPACT_WORKFLOWS_DIR:-${ROOT}/workflows}"
-# Resolve relative data/workflows to absolute for worker
-if [[ "${INSTANTIMPACT_DATA_DIR}" != /* ]]; then
-  export INSTANTIMPACT_DATA_DIR="${ROOT}/${INSTANTIMPACT_DATA_DIR#./}"
-fi
-if [[ "${INSTANTIMPACT_WORKFLOWS_DIR}" != /* ]]; then
-  export INSTANTIMPACT_WORKFLOWS_DIR="${ROOT}/${INSTANTIMPACT_WORKFLOWS_DIR#./}"
-fi
-
-# Ensure web deps once
-if [[ ! -d "${ROOT}/apps/web/node_modules" ]]; then
-  echo "  → npm install (web)"
-  (cd "${ROOT}/apps/web" && npm install)
-fi
-
-# API
-start_bg api \
-  bash -c "cd '${ROOT}' && exec '${VENV_PY}' -m uvicorn app.main:app --app-dir apps/api --host '${API_HOST}' --port '${API_PORT}'"
-
-# Worker
-start_bg worker \
-  bash -c "cd '${ROOT}/apps/worker' && \
-    export INSTANTIMPACT_REDIS_URL='${REDIS_URL}' \
-           INSTANTIMPACT_COMFY_URL='${COMFY_URL}' \
-           INSTANTIMPACT_COMFY_CKPT_NAME='${COMFY_CKPT}' \
-           INSTANTIMPACT_DATA_DIR='${INSTANTIMPACT_DATA_DIR}' \
-           INSTANTIMPACT_WORKFLOWS_DIR='${INSTANTIMPACT_WORKFLOWS_DIR}' && \
-    exec '${VENV_PY}' -m worker.main"
-
-# Web (Vite proxies /api → API)
-start_bg web \
-  bash -c "cd '${ROOT}/apps/web' && \
-    export VITE_API_PROXY='http://127.0.0.1:${API_PORT}' && \
-    exec npm run dev -- --host 0.0.0.0 --port '${WEB_PORT}'"
+export_runtime_env
+start_app_processes
 
 echo ""
 echo "== Ready (background) =="

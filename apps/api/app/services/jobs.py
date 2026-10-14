@@ -231,6 +231,20 @@ async def _enqueue(
             blocked = fail_closed_message(report)
             if blocked:
                 raise JobServiceError(blocked, 503)
+            from instantimpact_common.lora_comfy import ensure_character_lora
+
+            flux = (version.pipeline_params_json or {}).get("flux") or {}
+            lora_name = flux.get("comfy_lora_name")
+            lora_src = None
+            if version.lora_path:
+                lora_src = (get_layout().root / str(version.lora_path)).resolve()
+            missing_lora = ensure_character_lora(
+                lora_name,
+                lora_src,
+                Path(settings.comfy_loras_dir).expanduser(),
+            )
+            if missing_lora:
+                raise JobServiceError(missing_lora, 503)
 
     # Assign seeds (keep any seed already set, e.g. regenerate), unless the
     # policy is "same" — that overwrites so a whole expand set shares one face.
@@ -1182,6 +1196,7 @@ async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
             job.status = JobStatus.COMPLETED
             job.error_message = None
         job.finished_at = datetime.now(timezone.utc)
+        brief = None
         if job.brief_id:
             bq = await db.execute(select(ContentBrief).where(ContentBrief.id == job.brief_id))
             brief = bq.scalar_one_or_none()
@@ -1213,7 +1228,12 @@ async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
                 )
                 job.error_message = event.get("message") or "LoRA trained and registered"
             except Exception as e:
+                job.status = JobStatus.FAILED
+                job.error_code = "lora_register_failed"
                 job.error_message = f"Train finished but register failed: {e}"
+                job.finished_at = datetime.now(timezone.utc)
+                if brief:
+                    brief.status = "failed"
         await db.commit()
         return
 

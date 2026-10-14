@@ -13,6 +13,8 @@
 #   bash scripts/ii logs               # tail all logs (Ctrl+C to exit)
 #   bash scripts/ii logs worker        # tail one service
 #   bash scripts/ii restart
+#   sudo bash scripts/ii install-service  # start on boot
+#   bash scripts/ii update                # pull, refresh, restart
 #
 # Processes run in the background (nohup). You only need ONE terminal.
 # Logs:  .run/logs/    PIDs: .run/pids/
@@ -30,7 +32,7 @@ run_nemesis() {
 }
 
 usage() {
-  sed -n '2,16p' "$0"
+  sed -n '2,18p' "$0"
 }
 
 cmd="${1:-}"
@@ -128,6 +130,14 @@ case "$cmd" in
     bash "$0" stop
     sleep 1
     bash "$0" start "$@"
+    ;;
+
+  install-service)
+    bash "${NEMESIS}/install-service.sh" "$@"
+    ;;
+
+  update)
+    bash "${NEMESIS}/update.sh" "$@"
     ;;
 
   -h|--help|help|"")

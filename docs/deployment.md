@@ -2,26 +2,25 @@
 
 ## Easy start / stop (recommended day-to-day)
 
-On nemesis, after one-time setup (venv, `.env`, Comfy models):
+On nemesis, InstantImpact itself runs native. Ollama, Nemotron OCR, and vLLM stay in Docker and are paused only while a job owns the GPU.
 
 ```bash
 cd ~/InstantImpact
-chmod +x scripts/nemesis/*.sh
 
-# Bring up API + worker + web (+ Comfy, free GPU from vLLM)
-./scripts/nemesis/up.sh --with-comfy --stop-vllm
+# One time: start on boot as pkeener
+sudo bash scripts/ii install-service
+sudo systemctl start instantimpact
 
-# Check
-./scripts/nemesis/status.sh
+# Day to day
+bash scripts/ii status
+bash scripts/ii logs
+sudo systemctl stop instantimpact
 
-# When finished — free RAM/GPU for other work
-./scripts/nemesis/down.sh --all
-# optional: docker start vllm
+# After pulling fixes
+bash scripts/ii update
 ```
 
-Logs: `.run/logs/`. See `scripts/nemesis/README.md`.
-
-Optional **Docker Compose** for API/worker/web only (`docker compose up -d` / `down`). Uses **host Redis** on `127.0.0.1:6379` (already running on nemesis). Do not start a second Redis on that port. Comfy stays native on the host. If you have no host Redis: `docker compose --profile bundled-redis up -d`.
+`bash scripts/ii start` still works without systemd. It disables the Docker API/worker/web containers so they cannot take the GPU queue. Logs: `.run/logs/`. See `scripts/nemesis/README.md`.
 
 ---
 

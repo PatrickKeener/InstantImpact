@@ -23,6 +23,7 @@ show_proc() {
   fi
 }
 
+show_proc supervisor
 show_proc api
 show_proc worker
 show_proc web
@@ -54,9 +55,31 @@ else
 fi
 
 echo ""
+loras="${INSTANTIMPACT_COMFY_LORAS_DIR:-}"
+if [[ -n "$loras" && -d "$loras" && -w "$loras" ]]; then
+  echo "  ✓ loras      ${loras}"
+elif [[ -n "$loras" ]]; then
+  echo "  ✗ loras      ${loras} (missing or not writable)"
+else
+  echo "  ✗ loras      INSTANTIMPACT_COMFY_LORAS_DIR is unset"
+fi
+echo "  · lifecycle  ${INSTANTIMPACT_COMFY_LIFECYCLE:-job}"
+
+echo ""
 echo "  logs: ${LOG_DIR}/"
 if command -v docker >/dev/null 2>&1; then
-  if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx vllm; then
-    echo "  note: docker vllm is RUNNING (may contend for GPU with Flux)"
+  for name in instantimpact-api instantimpact-worker instantimpact-web; do
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$name"; then
+      echo "  ✗ docker ${name} is running and conflicts with the native stack"
+    fi
+  done
+  pause="${INSTANTIMPACT_GPU_PAUSE_CONTAINERS// /}"
+  if [[ -n "$pause" ]]; then
+    IFS=',' read -ra gpu_names <<< "$pause"
+    for name in "${gpu_names[@]}"; do
+      [[ -z "$name" ]] && continue
+      state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
+      echo "  · gpu ${name}: ${state}"
+    done
   fi
 fi

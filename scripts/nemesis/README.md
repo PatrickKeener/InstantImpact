@@ -7,6 +7,10 @@
 ```bash
 cd ~/InstantImpact
 
+# One time, so a reboot brings the native stack back
+sudo bash scripts/ii install-service
+sudo systemctl start instantimpact
+
 # Start API + worker + web (Comfy is started per still job)
 bash scripts/ii start
 
@@ -24,7 +28,11 @@ bash scripts/ii logs              # Ctrl+C only stops the tail
 bash scripts/ii logs worker
 bash scripts/ii stop              # stop everything
 bash scripts/ii restart
+bash scripts/ii update
+sudo systemctl stop instantimpact
 ```
+
+`ii start` turns off Docker restart for `instantimpact-api`, `instantimpact-worker`, and `instantimpact-web`. Leave ollama, nemotron-ocr-nim, and vllm running; the native worker stops them for a job and starts them again after Comfy exits.
 
 You can disconnect SSH after `start`; services keep running.
 

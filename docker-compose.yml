@@ -1,5 +1,9 @@
 # Optional Docker stack for InstantImpact app services (not ComfyUI).
 #
+# Do not use this on nemesis. The worker image has no CUDA, the Comfy tree is
+# mounted read-only, and restart=unless-stopped will fight the native stack.
+# On nemesis run: bash scripts/ii start
+#
 # ComfyUI stays on the host (models + GPU already set up at ~/ComfyUI).
 # Worker/API use host network so they can reach Comfy on 127.0.0.1:8188
 # and the host Redis already listening on 127.0.0.1:6379 (nemesis default).

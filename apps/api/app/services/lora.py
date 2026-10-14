@@ -22,6 +22,7 @@ from app.services.characters import (
 from app.services import identity as identity_svc
 from app.services.storage import get_layout, write_json
 from instantimpact_common.enums import CharacterStatus
+from instantimpact_common.lora_comfy import comfy_lora_filename, install_character_lora
 from instantimpact_prompts.contract import build_prompt_contract
 
 MIN_IMAGES_SOFT = 8
@@ -346,22 +347,19 @@ async def register_lora(
             500,
         ) from e
 
-    comfy_name = f"ii_{c.slug}_v{version.version_int:03d}.safetensors"
+    comfy_name = comfy_lora_filename(c.slug, version.version_int)
     comfy_installed = None
     settings = get_settings()
     if install_to_comfy:
         comfy_loras = Path(settings.comfy_loras_dir).expanduser()
         try:
-            comfy_loras.mkdir(parents=True, exist_ok=True)
-            target = comfy_loras / comfy_name
-            if dest != target.resolve():
-                shutil.copy2(dest, target)
+            target = install_character_lora(dest, comfy_loras, comfy_name)
             comfy_installed = str(target)
-        except PermissionError as e:
+        except OSError as e:
             raise CharacterServiceError(
                 f"Cannot install LoRA into Comfy folder {comfy_loras}: {e}. "
-                f"Set INSTANTIMPACT_COMFY_LORAS_DIR or chown that directory. "
-                f"Character path was saved; Comfy install failed.",
+                "Set INSTANTIMPACT_COMFY_LORAS_DIR or chown that directory. "
+                "The character weights were saved; Comfy install failed.",
                 500,
             ) from e
 
@@ -374,7 +372,10 @@ async def register_lora(
     params = dict(version.pipeline_params_json or {})
     flux = dict(params.get("flux") or {})
     flux["lora_strength"] = float(strength)
-    flux["comfy_lora_name"] = comfy_name
+    if comfy_installed:
+        flux["comfy_lora_name"] = comfy_name
+    else:
+        flux.pop("comfy_lora_name", None)
     params["flux"] = flux
     version.pipeline_params_json = params
 
@@ -418,13 +419,15 @@ async def register_lora(
     return {
         "character": character_to_out(await get_character(db, character_id)),
         "lora_path": version.lora_path,
-        "comfy_lora_name": comfy_name,
+        "comfy_lora_name": comfy_name if comfy_installed else None,
         "comfy_installed": comfy_installed,
         "trigger_word": trigger,
         "strength": strength,
         "message": (
-            "LoRA registered. Restart or refresh Comfy if it was already running so it sees "
-            f"{comfy_name}. Then lock the character and generate — stills will load this LoRA."
+            f"LoRA registered as {comfy_name}. The next still job loads it, then stops Comfy "
+            "and restores the other GPU services."
+            if comfy_installed
+            else "Character weights were saved. Comfy was not updated, so stills will not load this LoRA."
         ),
     }
 
@@ -464,6 +467,13 @@ async def lora_status(db: AsyncSession, character_id: str) -> dict[str, Any]:
             train_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
         flux = (version.pipeline_params_json or {}).get("flux") or {}
         comfy_lora = flux.get("comfy_lora_name")
+    comfy_lora_present = False
+    if comfy_lora:
+        from instantimpact_common.lora_comfy import character_lora_problem
+
+        comfy_lora_present = (
+            character_lora_problem(comfy_lora, Path(get_settings().comfy_loras_dir)) is None
+        )
 
     n_approved = len(approved)
     lock = identity_svc.read_lock(version)
@@ -504,6 +514,7 @@ async def lora_status(db: AsyncSession, character_id: str) -> dict[str, Any]:
         "lora_path": version.lora_path if version else None,
         "lora_file_present": lora_file,
         "comfy_lora_name": comfy_lora,
+        "comfy_lora_present": comfy_lora_present,
         "train_config": train_cfg,
         "version_id": version.id if version else None,
         "version_int": version.version_int if version else None,

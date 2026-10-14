@@ -34,9 +34,14 @@ done
 ensure_run_dirs
 echo "== InstantImpact down =="
 
-stop_name web
-stop_name worker
-stop_name api
+# The supervisor restarts children. Stop it first unless it invoked this script.
+if [[ -z "${II_FROM_SUPERVISOR:-}" ]]; then
+  stop_name supervisor 20
+fi
+
+stop_name web 8
+stop_name worker 30
+stop_name api 8
 
 if [[ "$WITH_COMFY" -eq 1 ]]; then
   stop_name comfy
