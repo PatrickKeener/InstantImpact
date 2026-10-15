@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
@@ -20,8 +21,19 @@ def get_engine():
             echo=False,
             connect_args={"check_same_thread": False},
         )
+        event.listen(_engine.sync_engine, "connect", _sqlite_on_connect)
         _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
     return _engine
+
+
+def _sqlite_on_connect(dbapi_connection, _connection_record) -> None:
+    """Apply per-connection SQLite pragmas. busy_timeout is not persisted."""
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
 
 
 def get_session_factory() -> async_sessionmaker[AsyncSession]:

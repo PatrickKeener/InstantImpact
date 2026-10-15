@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import BackgroundTasks
+from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -968,7 +970,10 @@ def _safe_unlink_under_data(rel_path: str | None) -> bool:
     except ValueError:
         return False
     if target.is_file():
-        target.unlink()
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            return False
         return True
     return False
 
@@ -981,8 +986,12 @@ def _unlink_asset_files(path: str | None, thumb_path: str | None) -> int:
             removed += 1
     if path:
         # still_000.png → still_000.disclosure.json (Path.with_suffix)
-        p = Path(str(path).replace("\\", "/"))
-        for cand in (str(p.with_suffix(".disclosure.json")), f"{path}.disclosure.json"):
+        cands: list[str] = [f"{path}.disclosure.json"]
+        try:
+            cands.insert(0, str(Path(str(path).replace("\\", "/")).with_suffix(".disclosure.json")))
+        except ValueError:
+            pass
+        for cand in cands:
             if _safe_unlink_under_data(cand):
                 removed += 1
     return removed
@@ -990,7 +999,7 @@ def _unlink_asset_files(path: str | None, thumb_path: str | None) -> int:
 
 async def delete_asset(db: AsyncSession, asset_id: str, *, delete_files: bool = True) -> dict:
     """Permanently remove asset row, ratings, job_item link, and optional media files."""
-    from app.db.models import AssetRating
+    from app.db.models import ApprovedSetItem, AssetRating
 
     q = await db.execute(select(Asset).where(Asset.id == asset_id))
     asset = q.scalar_one_or_none()
@@ -1001,24 +1010,27 @@ async def delete_asset(db: AsyncSession, asset_id: str, *, delete_files: bool = 
     path = asset.path
     thumb_path = asset.thumb_path
 
-    items = (
-        await db.execute(select(JobItem).where(JobItem.asset_id == asset_id))
-    ).scalars().all()
-    for item in items:
-        item.asset_id = None
-
-    ratings = (
-        await db.execute(select(AssetRating).where(AssetRating.asset_id == asset_id))
-    ).scalars().all()
-    for r in ratings:
-        await db.delete(r)
-
-    await db.delete(asset)
-    await db.commit()
-
+    # Remove files before the row so a permission error leaves the library unchanged.
     removed_files = 0
     if delete_files:
-        removed_files = _unlink_asset_files(path, thumb_path)
+        try:
+            removed_files = _unlink_asset_files(path, thumb_path)
+        except OSError as e:
+            log.warning("asset file delete failed id=%s path=%s err=%s", asset_id, path, e)
+            raise JobServiceError(_file_delete_message(e), 409) from e
+
+    try:
+        await db.execute(
+            sql_update(JobItem).where(JobItem.asset_id == asset_id).values(asset_id=None)
+        )
+        await db.execute(sql_delete(AssetRating).where(AssetRating.asset_id == asset_id))
+        await db.execute(sql_delete(ApprovedSetItem).where(ApprovedSetItem.asset_id == asset_id))
+        await db.delete(asset)
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        log.exception("asset row delete failed id=%s", asset_id)
+        raise JobServiceError(f"Could not delete still: {e}", 500) from e
 
     return {
         "id": asset_id,
@@ -1026,6 +1038,19 @@ async def delete_asset(db: AsyncSession, asset_id: str, *, delete_files: bool = 
         "character_id": character_id,
         "files_removed": removed_files,
     }
+
+
+def _file_delete_message(exc: OSError) -> str:
+    name = exc.filename or "a still file"
+    reason = exc.strerror or str(exc)
+    hint = ""
+    if isinstance(exc, PermissionError) or getattr(exc, "errno", None) in {1, 13}:
+        hint = (
+            " The API user cannot remove that file. On nemesis this is usually a "
+            "root-owned folder under data/ left by a root worker: "
+            "sudo chown -R pkeener:pkeener /home/pkeener/InstantImpact/data"
+        )
+    return f"Could not delete {name}: {reason}.{hint}"
 
 
 async def delete_assets_bulk(
@@ -1047,7 +1072,15 @@ async def delete_assets_bulk(
     deleted = 0
     files_removed = 0
     for aid in ids:
-        result = await delete_asset(db, aid, delete_files=delete_files)
+        try:
+            result = await delete_asset(db, aid, delete_files=delete_files)
+        except JobServiceError as e:
+            if deleted:
+                raise JobServiceError(
+                    f"Deleted {deleted} still(s), then failed: {e.message}",
+                    e.status_code,
+                ) from e
+            raise
         deleted += 1
         files_removed += int(result.get("files_removed") or 0)
     return {

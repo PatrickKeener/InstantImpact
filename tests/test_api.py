@@ -496,3 +496,88 @@ def test_approve_unlike_still_requires_force(client: TestClient):
         json={"decision": "approved", "force": True},
     )
     assert forced.status_code == 200, forced.text
+
+
+def test_bulk_delete_rejected_assets(client: TestClient):
+    c = _create_attested(client, "Reject Bin")
+    cid = c["id"]
+    assert client.post(f"/api/characters/{cid}/bootstrap").status_code == 200
+    seed = client.post(
+        f"/api/characters/{cid}/seed-gallery",
+        json={"count": 3, "themes": ["portrait"]},
+    )
+    assert seed.status_code == 200, seed.text
+    job = _wait_job(client, seed.json()["id"])
+    assert job["status"] == "completed", job
+
+    assets = client.get(f"/api/characters/{cid}/assets").json()
+    assert len(assets) >= 3
+    keep = assets[0]
+    rejected = assets[1:]
+    for a in rejected:
+        d = client.post(
+            f"/api/assets/{a['id']}/decision",
+            json={"decision": "rejected", "score": 1, "notes": "no"},
+        )
+        assert d.status_code == 200, d.text
+
+    aset = client.post(
+        f"/api/characters/{cid}/approved-sets",
+        json={"title": "mixed", "asset_ids": [keep["id"], rejected[0]["id"]]},
+    )
+    # Approved sets may require approved assets; ignore if the API refuses.
+    if aset.status_code == 200:
+        set_id = aset.json()["id"]
+    else:
+        set_id = None
+
+    gone = client.post(
+        f"/api/characters/{cid}/assets/delete",
+        json={"decision": "rejected", "delete_files": True},
+    )
+    assert gone.status_code == 200, gone.text
+    body = gone.json()
+    assert body["deleted"] == len(rejected)
+    assert body["character_id"] == cid
+
+    left = client.get(f"/api/characters/{cid}/assets").json()
+    assert [a["id"] for a in left] == [keep["id"]]
+    assert client.get(f"/api/system/media/{keep['path']}").status_code == 200
+    for a in rejected:
+        assert client.get(f"/api/system/media/{a['path']}").status_code == 404
+
+    one = client.delete(f"/api/assets/{keep['id']}?delete_files=true")
+    assert one.status_code == 200, one.text
+    assert client.get(f"/api/characters/{cid}/assets").json() == []
+    if set_id:
+        fetched = client.get(f"/api/approved-sets/{set_id}")
+        assert fetched.status_code == 200, fetched.text
+
+
+def test_bulk_delete_permission_error_keeps_rows(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    cid = _create_attested(client, "Perm Deny")["id"]
+    imported = client.post(
+        f"/api/characters/{cid}/assets/import",
+        files=[("files", ("a.png", _png_bytes(), "image/png"))],
+        data={"confirm_synthetic": "true"},
+    )
+    assert imported.status_code == 200, imported.text
+    asset_id = imported.json()["assets"][0]["id"]
+    rejected = client.post(
+        f"/api/assets/{asset_id}/decision",
+        json={"decision": "rejected"},
+    )
+    assert rejected.status_code == 200, rejected.text
+
+    def _boom(self, *args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(Path, "unlink", _boom)
+    gone = client.post(
+        f"/api/characters/{cid}/assets/delete",
+        json={"decision": "rejected", "delete_files": True},
+    )
+    assert gone.status_code == 409, gone.text
+    assert "Permission denied" in gone.json()["detail"]
+    left = client.get(f"/api/characters/{cid}/assets").json()
+    assert [a["id"] for a in left] == [asset_id]
