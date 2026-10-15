@@ -1,0 +1,104 @@
+{
+  "_meta": {
+    "name": "InstantImpact Wan 2.2 TI2V-5B vertical image-to-video",
+    "source": "Comfy-Org video_wan2_2_5B_ti2v template",
+    "version": 1
+  },
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "{{WAN_UNET_NAME}}",
+      "weight_dtype": "default"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "{{WAN_CLIP_NAME}}",
+      "type": "wan",
+      "device": "default"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "{{WAN_VAE_NAME}}"
+    }
+  },
+  "4": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{VIDEO_SOURCE_IMAGE}}"
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["2", 0],
+      "text": "{{VIDEO_PROMPT}}"
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["2", 0],
+      "text": "{{VIDEO_NEGATIVE}}"
+    }
+  },
+  "7": {
+    "class_type": "Wan22ImageToVideoLatent",
+    "inputs": {
+      "vae": ["3", 0],
+      "start_image": ["4", 0],
+      "width": "{{VIDEO_WIDTH}}",
+      "height": "{{VIDEO_HEIGHT}}",
+      "length": "{{VIDEO_FRAMES}}",
+      "batch_size": 1
+    }
+  },
+  "8": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": ["1", 0],
+      "shift": 8.0
+    }
+  },
+  "9": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["8", 0],
+      "positive": ["5", 0],
+      "negative": ["6", 0],
+      "latent_image": ["7", 0],
+      "seed": "{{VIDEO_SEED}}",
+      "steps": "{{VIDEO_STEPS}}",
+      "cfg": 5.0,
+      "sampler_name": "uni_pc",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "10": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["9", 0],
+      "vae": ["3", 0]
+    }
+  },
+  "11": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": ["10", 0],
+      "fps": "{{VIDEO_FPS}}"
+    }
+  },
+  "12": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": ["11", 0],
+      "filename_prefix": "{{VIDEO_FILENAME_PREFIX}}",
+      "format": "auto",
+      "codec": "auto"
+    }
+  }
+}

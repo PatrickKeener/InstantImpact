@@ -48,3 +48,18 @@ Same as above plus **LoraLoader** (`LORA_NAME`, `LORA_STRENGTH`). Selected autom
 | `VAE_NAME` | Flux autoencoder | `models/vae/` |
 
 Every other node id matches the fp8 templates, so the detail-LoRA and hi-res bypasses behave identically. Selected by `INSTANTIMPACT_COMFY_LOADER=split`. Point `INSTANTIMPACT_COMFY_UNET_NAME` at `flux1-dev.safetensors` or the photoreal `flux1-krea-dev.safetensors` (see `scripts/bootstrap_models.py --profile krea`).
+
+## `qwen_garment_tryon_v1.json`
+
+Local Qwen Image Edit FP8 post-process for products marked as garments and
+placed as `wearing`. The worker uploads a composite containing the generated
+person and garment reference, applies exact garment/styling instructions, and
+replaces the base still with the edited result. Install with
+`scripts/bootstrap_models.py --profile garment`.
+
+## `wan22_5b_i2v_vertical_v1.json`
+
+Wan 2.2 TI2V-5B image-to-video workflow derived from Comfy-Org's official
+template. It creates silent 480×832 vertical clips from approved stills and
+saves them through core `CreateVideo`/`SaveVideo` nodes. Install with
+`scripts/bootstrap_models.py --profile video`.

@@ -10,6 +10,18 @@ export default function Products() {
   const [name, setName] = useState("");
   const [brand, setBrand] = useState("");
   const [description, setDescription] = useState("");
+  const [productKind, setProductKind] = useState<"product" | "garment">("product");
+  const [garment, setGarment] = useState({
+    category: "",
+    color: "",
+    material: "",
+    pattern: "",
+    fit: "",
+    sleeves: "",
+    neckline: "",
+    length: "",
+    details: "",
+  });
   const [file, setFile] = useState<File | null>(null);
 
   async function refresh() {
@@ -36,11 +48,25 @@ export default function Products() {
         name,
         brand: brand || undefined,
         description: description || undefined,
+        productKind,
+        garment: productKind === "garment" ? garment : undefined,
         image: file,
       });
       setName("");
       setBrand("");
       setDescription("");
+      setProductKind("product");
+      setGarment({
+        category: "",
+        color: "",
+        material: "",
+        pattern: "",
+        fit: "",
+        sleeves: "",
+        neckline: "",
+        length: "",
+        details: "",
+      });
       setFile(null);
       setInfo("Product added. Attach it from Character Studio → Batch stills.");
       await refresh();
@@ -118,6 +144,47 @@ export default function Products() {
               placeholder="matte frosted glass bottle, gold dropper, sage label"
             />
           </label>
+          <label className="block space-y-1 text-sm">
+            <span className="text-slate-400">Type</span>
+            <select
+              className="input"
+              value={productKind}
+              onChange={(e) => setProductKind(e.target.value as "product" | "garment")}
+            >
+              <option value="product">General product</option>
+              <option value="garment">Clothing / garment</option>
+            </select>
+          </label>
+          {productKind === "garment" && (
+            <div className="grid gap-3 sm:col-span-2 sm:grid-cols-3">
+              {(
+                [
+                  ["category", "Category", "dress, jacket, top"],
+                  ["color", "Color", "deep burgundy"],
+                  ["material", "Material", "silk, denim, knit"],
+                  ["pattern", "Pattern", "solid, floral, striped"],
+                  ["fit", "Fit", "fitted, relaxed, oversized"],
+                  ["sleeves", "Sleeves", "sleeveless, long sleeve"],
+                  ["neckline", "Neckline", "crew, V-neck, halter"],
+                  ["length", "Length", "cropped, midi, ankle"],
+                  ["details", "Exact details", "buttons, logo, trim, seams"],
+                ] as const
+              ).map(([key, label, placeholder]) => (
+                <label key={key} className="block space-y-1 text-sm">
+                  <span className="text-slate-400">{label}</span>
+                  <input
+                    className="input"
+                    required={key === "category"}
+                    value={garment[key]}
+                    placeholder={placeholder}
+                    onChange={(e) =>
+                      setGarment((current) => ({ ...current, [key]: e.target.value }))
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+          )}
           <label className="block space-y-1 text-sm sm:col-span-2">
             <span className="text-slate-400">Product image</span>
             <input
@@ -159,6 +226,9 @@ export default function Products() {
                 </div>
                 <div className="space-y-1 p-3">
                   <div className="font-medium text-slate-100">{p.name}</div>
+                  {p.meta?.product_kind === "garment" && (
+                    <div className="text-xs font-medium text-accent-soft">garment</div>
+                  )}
                   {p.brand && <div className="text-xs text-slate-500">{p.brand}</div>}
                   {p.description && (
                     <p className="line-clamp-2 text-xs text-slate-400">{p.description}</p>

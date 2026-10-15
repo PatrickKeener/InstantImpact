@@ -126,6 +126,7 @@ export type Job = {
 
 export type Asset = {
   id: string;
+  kind: string;
   path: string;
   thumb_path: string | null;
   decision: string;
@@ -329,6 +330,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ count, more_like: moreLike }),
     }),
+  createVideo: (
+    characterId: string,
+    assetId: string,
+    body: {
+      motion_prompt: string;
+      negative_prompt?: string;
+      frames?: number;
+      fps?: number;
+      steps?: number;
+      seed?: number;
+    }
+  ) =>
+    request<Job>(`/api/characters/${characterId}/assets/${assetId}/video`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   loraStatus: (id: string) => request<LoraStatus>(`/api/characters/${id}/lora/status`),
   buildDataset: (id: string, body?: { decision?: string; min_images?: number }) =>
     request<{
@@ -453,12 +470,28 @@ export const api = {
     name: string;
     description?: string;
     brand?: string;
+    productKind?: "product" | "garment";
+    garment?: {
+      category?: string;
+      color?: string;
+      material?: string;
+      pattern?: string;
+      fit?: string;
+      sleeves?: string;
+      neckline?: string;
+      length?: string;
+      details?: string;
+    };
     image: File;
   }) => {
     const form = new FormData();
     form.append("name", fields.name);
     if (fields.description) form.append("description", fields.description);
     if (fields.brand) form.append("brand", fields.brand);
+    form.append("product_kind", fields.productKind || "product");
+    for (const [key, value] of Object.entries(fields.garment || {})) {
+      if (value) form.append(`garment_${key}`, value);
+    }
     form.append("image", fields.image);
     const headers: Record<string, string> = {};
     const token = apiToken();

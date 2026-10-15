@@ -19,6 +19,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("INSTANTIMPACT_DATABASE_URL", f"sqlite+aiosqlite:///{db.as_posix()}")
     monkeypatch.setenv("INSTANTIMPACT_MOCK_GENERATION", "true")
     monkeypatch.setenv("INSTANTIMPACT_COMFY_ENABLED", "false")
+    monkeypatch.setenv("INSTANTIMPACT_ENABLE_VIDEO", "true")
     monkeypatch.setenv("INSTANTIMPACT_REQUIRE_AUTH_TOKEN", "false")
     monkeypatch.setenv("INSTANTIMPACT_API_TOKEN", "")
     monkeypatch.setenv("INSTANTIMPACT_HOST", "127.0.0.1")
@@ -105,6 +106,31 @@ def test_import_seed_stills_lands_in_outputs(client: TestClient):
     assert all(a["meta"].get("imported") for a in assets)
     media = client.get(f"/api/system/media/{assets[0]['path']}")
     assert media.status_code == 200
+
+
+def test_approved_still_can_enqueue_vertical_video(client: TestClient):
+    cid = _create_attested(client, "Video Source")["id"]
+    imported = client.post(
+        f"/api/characters/{cid}/assets/import",
+        files=[("files", ("source.png", _png_bytes(), "image/png"))],
+        data={"confirm_synthetic": "true", "auto_approve": "true"},
+    )
+    assert imported.status_code == 200, imported.text
+    asset_id = imported.json()["assets"][0]["id"]
+    video = client.post(
+        f"/api/characters/{cid}/assets/{asset_id}/video",
+        json={"motion_prompt": "gentle turn toward camera and subtle fabric movement"},
+    )
+    assert video.status_code == 200, video.text
+    job = video.json()
+    assert job["type"] == "video_i2v"
+    completed = client.get(f"/api/jobs/{job['id']}").json()
+    assert completed["status"] == "completed", completed
+    assets = client.get(f"/api/characters/{cid}/assets").json()
+    clips = [a for a in assets if a["kind"] == "video"]
+    assert len(clips) == 1
+    assert clips[0]["meta"]["source_asset_id"] == asset_id
+    assert clips[0]["meta"]["silent"] is True
 
 
 def test_health(client: TestClient):

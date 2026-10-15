@@ -26,7 +26,7 @@ from arq.connections import RedisSettings
 
 from worker.tasks.stills import process_still_job
 from worker.tasks.train import process_lora_train
-
+from worker.tasks.video import process_video_job
 
 log = logging.getLogger("instantimpact.worker")
 
@@ -52,6 +52,8 @@ async def run_generation_job(ctx, job_id: str, request_path: str, job_type: str)
     try:
         if job_type == "lora_train":
             result = await process_lora_train(ctx, job_id, request_path)
+        elif job_type == "video_i2v":
+            result = await process_video_job(ctx, job_id, request_path)
         else:
             result = await process_still_job(ctx, job_id, request_path, job_type)
     except Exception:

@@ -8,15 +8,26 @@ import uuid
 from pathlib import Path
 
 from fastapi import UploadFile
+from instantimpact_prompts.product import PRODUCT_PLACEMENTS, normalize_placement
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Product
 from app.services.storage import get_layout, relative_to_data, sha256_file
-from instantimpact_prompts.product import PRODUCT_PLACEMENTS, normalize_placement
 
 _ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".webp"}
 _MAX_BYTES = 15 * 1024 * 1024
+GARMENT_FIELDS = (
+    "category",
+    "color",
+    "material",
+    "pattern",
+    "fit",
+    "sleeves",
+    "neckline",
+    "length",
+    "details",
+)
 
 
 class ProductServiceError(Exception):
@@ -83,6 +94,8 @@ async def create_product(
     upload: UploadFile,
     description: str | None = None,
     brand: str | None = None,
+    product_kind: str = "product",
+    garment: dict[str, str | None] | None = None,
 ) -> dict:
     from app.config import get_settings
 
@@ -93,6 +106,16 @@ async def create_product(
     raw_name = (name or "").strip()
     if not raw_name:
         raise ProductServiceError("Product name is required")
+    kind = (product_kind or "product").strip().lower()
+    if kind not in {"product", "garment"}:
+        raise ProductServiceError("Product kind must be product or garment")
+    garment_meta = {
+        key: str((garment or {}).get(key) or "").strip()
+        for key in GARMENT_FIELDS
+        if str((garment or {}).get(key) or "").strip()
+    }
+    if kind == "garment" and not garment_meta.get("category"):
+        raise ProductServiceError("Garment category is required")
 
     filename = upload.filename or "product.png"
     ext = Path(filename).suffix.lower()
@@ -143,7 +166,9 @@ async def create_product(
         width=im.width,
         height=im.height,
         meta_json={
-            "kind": "product_ref",
+            "kind": "garment_ref" if kind == "garment" else "product_ref",
+            "product_kind": kind,
+            "garment": garment_meta,
             "original_filename": filename,
             "placements": list(PRODUCT_PLACEMENTS.keys()),
         },
@@ -161,6 +186,8 @@ async def update_product(
     name: str | None = None,
     description: str | None = None,
     brand: str | None = None,
+    product_kind: str | None = None,
+    garment: dict[str, str | None] | None = None,
 ) -> dict:
     p = await get_product(db, product_id)
     if name is not None:
@@ -173,6 +200,24 @@ async def update_product(
         p.description = description.strip() or None
     if brand is not None:
         p.brand = brand.strip() or None
+    meta = dict(p.meta_json or {})
+    if product_kind is not None:
+        kind = product_kind.strip().lower()
+        if kind not in {"product", "garment"}:
+            raise ProductServiceError("Product kind must be product or garment")
+        meta["product_kind"] = kind
+        meta["kind"] = "garment_ref" if kind == "garment" else "product_ref"
+    if garment is not None:
+        current = dict(meta.get("garment") or {})
+        for key in GARMENT_FIELDS:
+            if key in garment:
+                value = str(garment.get(key) or "").strip()
+                if value:
+                    current[key] = value
+                else:
+                    current.pop(key, None)
+        meta["garment"] = current
+    p.meta_json = meta
     await db.commit()
     await db.refresh(p)
     return product_to_out(p)
@@ -200,15 +245,23 @@ async def delete_product(db: AsyncSession, product_id: str) -> dict:
 def resolve_product_fields(product: Product, placement: str | None) -> dict:
     """Denormalize product into StillUnitRequest fields."""
     place = normalize_placement(placement)
+    meta = product.meta_json or {}
+    garment = dict(meta.get("garment") or {})
     desc_parts = []
     if product.brand:
         desc_parts.append(f"brand {product.brand}")
     if product.description:
         desc_parts.append(product.description)
+    if meta.get("product_kind") == "garment":
+        desc_parts.extend(
+            f"{key} {value}" for key, value in garment.items() if value
+        )
     return {
         "product_id": product.id,
         "product_name": product.name,
         "product_description": "; ".join(desc_parts) if desc_parts else None,
         "product_ref_path": product.primary_path,
         "product_placement": place,
+        "product_kind": meta.get("product_kind", "product"),
+        "garment": garment,
     }

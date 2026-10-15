@@ -178,6 +178,8 @@ class BriefItem(BaseModel):
     # Optional product reference for ad-style stills (resolved at enqueue)
     product_id: str | None = None
     product_placement: str | None = None  # holding | beside | using | featured | wearing
+    garment_styling: str | None = None
+    accessories: str | None = None
 
 
 class StillUnitRequest(BaseModel):
@@ -198,6 +200,17 @@ class StillUnitRequest(BaseModel):
     product_description: str | None = None
     product_ref_path: str | None = None
     product_placement: str | None = None
+    product_kind: str | None = None
+    garment: dict[str, str] = Field(default_factory=dict)
+    garment_styling: str | None = None
+    accessories: str | None = None
+    source_asset_id: str | None = None
+    source_image_path: str | None = None
+    video_motion: str | None = None
+    video_negative: str | None = None
+    video_frames: int | None = None
+    video_fps: int | None = None
+    video_steps: int | None = None
 
 
 class JobRequestSnapshot(BaseModel):

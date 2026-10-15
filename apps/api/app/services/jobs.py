@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 import random
 import uuid
 from datetime import datetime, timezone
@@ -8,6 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import BackgroundTasks
+from instantimpact_common.enums import CharacterStatus, JobItemStatus, JobStatus, JobType
+from instantimpact_common.safety import validate_for_enqueue
+from instantimpact_common.schemas import BriefItem, JobRequestSnapshot, StillUnitRequest
+from instantimpact_prompts.render_flux import render_flux_prompts
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
 from sqlalchemy import update as sql_update
@@ -20,10 +26,6 @@ from app.schemas.jobs import SeedGalleryRequest, StillBatchRequest
 from app.services import characters as char_svc
 from app.services import identity as identity_svc
 from app.services.storage import get_layout, relative_to_data, write_json
-from instantimpact_common.enums import CharacterStatus, JobItemStatus, JobStatus, JobType
-from instantimpact_common.safety import validate_for_enqueue
-from instantimpact_common.schemas import BriefItem, JobRequestSnapshot, StillUnitRequest
-from instantimpact_prompts.render_flux import render_flux_prompts
 
 log = logging.getLogger("instantimpact.jobs")
 
@@ -124,6 +126,8 @@ def _expand_brief_items(items: list[BriefItem] | list[dict]) -> list[StillUnitRe
                     extra_prompt=item.extra_prompt,
                     product_id=item.product_id,
                     product_placement=item.product_placement,
+                    garment_styling=item.garment_styling,
+                    accessories=item.accessories,
                 )
             )
             idx += 1
@@ -155,6 +159,8 @@ async def _attach_products(db: AsyncSession, units: list[StillUnitRequest]) -> N
         u.product_description = fields["product_description"]
         u.product_ref_path = fields["product_ref_path"]
         u.product_placement = fields["product_placement"]
+        u.product_kind = fields["product_kind"]
+        u.garment = fields["garment"]
 
 
 def _version_for_generation(c) -> Any:
@@ -201,6 +207,10 @@ async def _enqueue(
                     u.product_name,
                     u.product_description,
                     u.product_placement,
+                    u.garment_styling,
+                    u.accessories,
+                    u.video_motion,
+                    u.video_negative,
                 ],
             )
         )
@@ -224,7 +234,9 @@ async def _enqueue(
     if not mock:
         from instantimpact_common.flux_inventory import (
             fail_closed_message,
+            find_model,
             inspect_flux_still,
+            resolve_comfy_root,
             stills_require_pipeline,
         )
 
@@ -247,6 +259,82 @@ async def _enqueue(
             )
             if missing_lora:
                 raise JobServiceError(missing_lora, 503)
+
+        optional_required: list[tuple[str, str]] = []
+        if str(job_type) == str(JobType.VIDEO_I2V):
+            optional_required.extend(
+                [
+                    (
+                        "diffusion_models",
+                        os.environ.get(
+                            "INSTANTIMPACT_WAN_UNET",
+                            "wan2.2_ti2v_5B_fp16.safetensors",
+                        ),
+                    ),
+                    (
+                        "clip",
+                        os.environ.get(
+                            "INSTANTIMPACT_WAN_CLIP",
+                            "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+                        ),
+                    ),
+                    (
+                        "vae",
+                        os.environ.get("INSTANTIMPACT_WAN_VAE", "wan2.2_vae.safetensors"),
+                    ),
+                ]
+            )
+        if any(
+            u.product_kind == "garment" and u.product_placement == "wearing"
+            for u in units
+        ):
+            optional_required.extend(
+                [
+                    (
+                        "diffusion_models",
+                        os.environ.get(
+                            "INSTANTIMPACT_QWEN_EDIT_UNET",
+                            "qwen_image_edit_fp8_e4m3fn.safetensors",
+                        ),
+                    ),
+                    (
+                        "clip",
+                        os.environ.get(
+                            "INSTANTIMPACT_QWEN_EDIT_CLIP",
+                            "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+                        ),
+                    ),
+                    (
+                        "vae",
+                        os.environ.get(
+                            "INSTANTIMPACT_QWEN_EDIT_VAE", "qwen_image_vae.safetensors"
+                        ),
+                    ),
+                    (
+                        "loras",
+                        os.environ.get(
+                            "INSTANTIMPACT_QWEN_EDIT_LORA",
+                            "Qwen-Image-Edit-Lightning-4steps-V1.0-bf16.safetensors",
+                        ),
+                    ),
+                ]
+            )
+        if optional_required:
+            comfy_root = resolve_comfy_root(settings.comfy_dir)
+            missing = [
+                name
+                for kind, name in optional_required
+                if find_model(comfy_root, kind, name) is None
+            ]
+            if missing:
+                profile = "video" if str(job_type) == str(JobType.VIDEO_I2V) else "garment"
+                raise JobServiceError(
+                    "Missing Comfy model files: "
+                    + ", ".join(missing)
+                    + f". Run: python scripts/bootstrap_models.py --profile {profile} "
+                    "--i-accept-licenses",
+                    503,
+                )
 
     # Assign seeds (keep any seed already set, e.g. regenerate), unless the
     # policy is "same" — that overwrites so a whole expand set shares one face.
@@ -510,8 +598,9 @@ async def enqueue_lora_train(
     background_tasks: BackgroundTasks | None = None,
 ) -> dict:
     """Build dataset (optional) then enqueue an Ostris AI Toolkit LoRA train job."""
-    from app.services import lora as lora_svc
     from instantimpact_common.toolkit import resolve_toolkit_dir
+
+    from app.services import lora as lora_svc
 
     settings = get_settings()
     explicit = settings.ai_toolkit_dir or None
@@ -644,6 +733,58 @@ async def enqueue_regenerate(
         aspect_ratio=req.get("aspect_ratio") or "4:5",
         seed_policy="random",
         background_tasks=background_tasks,
+    )
+    return job_to_out(job)
+
+
+async def enqueue_video_i2v(
+    db: AsyncSession,
+    character_id: str,
+    asset_id: str,
+    *,
+    motion_prompt: str,
+    negative_prompt: str | None = None,
+    frames: int = 81,
+    fps: int = 16,
+    steps: int = 20,
+    seed: int | None = None,
+    background_tasks: BackgroundTasks | None = None,
+) -> dict:
+    """Animate one approved still into a short vertical marketing clip."""
+    q = await db.execute(select(Asset).where(Asset.id == asset_id))
+    asset = q.scalar_one_or_none()
+    if not asset or asset.character_id != character_id:
+        raise JobServiceError("Source still not found", 404)
+    if asset.kind != "still":
+        raise JobServiceError("Video generation requires a still image")
+    if asset.decision != "approved":
+        raise JobServiceError("Approve the source still before creating a video", 409)
+    source = get_layout().root / str(asset.path).replace("\\", "/")
+    if not source.is_file():
+        raise JobServiceError(f"Source still is missing on disk: {asset.path}", 400)
+
+    unit = StillUnitRequest(
+        item_index=0,
+        seed=seed,
+        theme="marketing_video",
+        extra_prompt=motion_prompt,
+        source_asset_id=asset.id,
+        source_image_path=asset.path,
+        video_motion=motion_prompt,
+        video_negative=negative_prompt,
+        video_frames=frames,
+        video_fps=fps,
+        video_steps=steps,
+    )
+    job = await _enqueue(
+        db,
+        job_type=JobType.VIDEO_I2V,
+        character_id=character_id,
+        units=[unit],
+        aspect_ratio="9:16",
+        seed_policy="random",
+        background_tasks=background_tasks,
+        extra_meta={"source_asset_id": asset.id, "output_kind": "video"},
     )
     return job_to_out(job)
 
@@ -1191,7 +1332,7 @@ async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
             character_version_id=job.character_version_id or "",
             job_id=job.id,
             job_item_id=item.id,
-            kind="still",
+            kind=str(event.get("kind") or "still"),
             path=str(path),
             thumb_path=event.get("thumb_path"),
             sha256=event.get("sha256") or "",
@@ -1273,9 +1414,8 @@ async def apply_job_event(db: AsyncSession, event: dict[str, Any]) -> None:
 
 async def run_mock_job(db: AsyncSession, job_id: str) -> None:
     """In-process mock generator when worker/Comfy unavailable — produces placeholder stills."""
-    from PIL import Image, ImageDraw, ImageFont
-
     from instantimpact_common.safety_lists import SYNTHETIC_DISCLOSURE_DEFAULT
+    from PIL import Image, ImageDraw, ImageFont
 
     job = await get_job(db, job_id)
     if job.status not in (JobStatus.QUEUED, JobStatus.RUNNING):
@@ -1290,6 +1430,64 @@ async def run_mock_job(db: AsyncSession, job_id: str) -> None:
     snapshot = job.request_json or {}
     character_id = job.character_id or ""
     version_id = job.character_version_id or ""
+    if job.type == JobType.VIDEO_I2V:
+        item = sorted(job.items, key=lambda x: x.item_index)[0]
+        req = item.request_json or {}
+        out_dir = layout.outputs_dir / character_id / job_id / "videos"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        source = layout.root / str(req.get("source_image_path") or "").replace("\\", "/")
+        poster = out_dir / "poster_000.png"
+        if source.is_file():
+            import shutil
+
+            shutil.copy2(source, poster)
+        else:
+            poster.write_bytes(b"")
+        video = out_dir / "video_000.mp4"
+        video.write_bytes(b"INSTANTIMPACT_MOCK_VIDEO")
+        frames = int(req.get("video_frames") or 81)
+        fps = int(req.get("video_fps") or 16)
+        meta = {
+            "synthetic": True,
+            "ai_generated": True,
+            "age_appearance": "21+",
+            "source_asset_id": req.get("source_asset_id"),
+            "motion_prompt": req.get("video_motion"),
+            "frames": frames,
+            "fps": fps,
+            "duration_seconds": round(frames / fps, 2),
+            "pipeline": "mock_video",
+            "silent": True,
+        }
+        write_json(video.with_suffix(".mp4.disclosure.json"), meta)
+        asset_id = str(uuid.uuid4())
+        db.add(
+            Asset(
+                id=asset_id,
+                character_id=character_id,
+                character_version_id=version_id,
+                job_id=job_id,
+                job_item_id=item.id,
+                kind="video",
+                path=relative_to_data(video),
+                thumb_path=relative_to_data(poster),
+                sha256=hashlib.sha256(video.read_bytes()).hexdigest(),
+                width=480,
+                height=832,
+                seed=req.get("seed"),
+                prompt_positive=req.get("video_motion"),
+                prompt_negative=req.get("video_negative"),
+                pipeline="mock_video",
+                meta_json=meta,
+                decision="pending",
+            )
+        )
+        item.status = JobItemStatus.DONE
+        item.asset_id = asset_id
+        job.status = JobStatus.COMPLETED
+        job.finished_at = datetime.now(timezone.utc)
+        await db.commit()
+        return
     out_dir = layout.output_stills_dir(character_id, job_id)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1356,8 +1554,6 @@ async def run_mock_job(db: AsyncSession, job_id: str) -> None:
         img.save(path, "PNG")
         thumb = out_dir / f"thumb_{item.item_index:03d}.png"
         img.resize((192, 240)).save(thumb, "PNG")
-
-        import hashlib
 
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         asset_id = str(uuid.uuid4())

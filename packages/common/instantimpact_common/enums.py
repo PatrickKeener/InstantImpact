@@ -27,6 +27,7 @@ class JobType(StrEnum):
     LORA_TRAIN = "lora_train"
     REF_EMBED = "ref_embed"
     VALIDATION_SHEET = "validation_sheet"
+    VIDEO_I2V = "video_i2v"
 
 
 class JobStatus(StrEnum):

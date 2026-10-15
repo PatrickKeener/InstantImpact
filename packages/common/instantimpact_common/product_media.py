@@ -46,7 +46,15 @@ def paste_product_corner(base, product_path: Path, *, margin: int = 24, max_widt
 def shot_meta_from_item(item: dict[str, Any]) -> dict[str, Any]:
     """Theme/outfit/pose/location for training captions and disclosure sidecars."""
     meta: dict[str, Any] = {}
-    for key in ("theme", "outfit_hint", "pose_hint", "location_hint", "extra_prompt"):
+    for key in (
+        "theme",
+        "outfit_hint",
+        "pose_hint",
+        "location_hint",
+        "extra_prompt",
+        "garment_styling",
+        "accessories",
+    ):
         value = item.get(key)
         if value is None:
             continue
@@ -64,5 +72,12 @@ def product_meta_from_item(item: dict[str, Any]) -> dict[str, Any]:
         "product_name": item.get("product_name"),
         "product_ref_path": item.get("product_ref_path"),
         "product_placement": item.get("product_placement"),
-        "product_conditioning": "prompt",  # image IP-Adapter slot reserved for later
+        "product_kind": item.get("product_kind"),
+        "garment": item.get("garment") or {},
+        "product_conditioning": (
+            "qwen_image_edit_tryon"
+            if item.get("product_kind") == "garment"
+            and item.get("product_placement") == "wearing"
+            else "prompt"
+        ),
     }

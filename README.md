@@ -16,11 +16,13 @@ Full architecture, consistency strategy, and PR plan:
 
 | In | Out (later) |
 |----|-------------|
-| Character Creator | Short video (I2V) |
+| Character Creator | Talking/lip-synced video |
 | Flux still consistency path | Ollama captions |
 | Seed gallery + batch stills | SDXL dual pipeline |
 | Review / approve | Fanvue API |
 | Mock gen + ComfyUI hooks | Kohya fallback |
+| Garment reference try-on | |
+| Silent vertical I2V marketing clips | |
 
 ## Where to run it
 

@@ -3,9 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
-
 from instantimpact_common.schemas import BriefItem
+from pydantic import BaseModel, Field
 
 
 class SeedGalleryRequest(BaseModel):
@@ -176,6 +175,22 @@ class RegenerateAssetRequest(BaseModel):
         default=False,
         description="Lock this still as the face and generate pose/outfit variations with the same seed",
     )
+
+
+class VideoGenerateRequest(BaseModel):
+    motion_prompt: str = Field(
+        default=(
+            "subtle natural movement, gentle breathing, slight head turn, "
+            "slow camera push-in, preserve face and clothing"
+        ),
+        min_length=3,
+        max_length=1200,
+    )
+    negative_prompt: str | None = Field(default=None, max_length=1200)
+    frames: int = Field(default=81, ge=17, le=121)
+    fps: int = Field(default=16, ge=8, le=30)
+    steps: int = Field(default=20, ge=4, le=40)
+    seed: int | None = None
 
 
 class ApprovedSetCreateRequest(BaseModel):

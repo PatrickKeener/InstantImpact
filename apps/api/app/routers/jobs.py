@@ -21,6 +21,7 @@ from app.schemas.jobs import (
     SeedGalleryRequest,
     SeedImportResponse,
     StillBatchRequest,
+    VideoGenerateRequest,
 )
 from app.services import approved as approved_svc
 from app.services import jobs as svc
@@ -195,6 +196,34 @@ async def regenerate_asset(
             asset_id,
             count=body.count,
             more_like=body.more_like,
+            background_tasks=background_tasks,
+        )
+    except svc.JobServiceError as e:
+        raise _err(e) from e
+
+
+@router.post(
+    "/characters/{character_id}/assets/{asset_id}/video",
+    response_model=JobOut,
+)
+async def create_asset_video(
+    character_id: str,
+    asset_id: str,
+    background_tasks: BackgroundTasks,
+    payload: VideoGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await svc.enqueue_video_i2v(
+            db,
+            character_id,
+            asset_id,
+            motion_prompt=payload.motion_prompt,
+            negative_prompt=payload.negative_prompt,
+            frames=payload.frames,
+            fps=payload.fps,
+            steps=payload.steps,
+            seed=payload.seed,
             background_tasks=background_tasks,
         )
     except svc.JobServiceError as e:

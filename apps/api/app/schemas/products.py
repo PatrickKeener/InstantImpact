@@ -27,3 +27,13 @@ class ProductUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None
     brand: str | None = Field(default=None, max_length=120)
+    product_kind: str | None = Field(default=None, pattern="^(product|garment)$")
+    garment_category: str | None = None
+    garment_color: str | None = None
+    garment_material: str | None = None
+    garment_pattern: str | None = None
+    garment_fit: str | None = None
+    garment_sleeves: str | None = None
+    garment_neckline: str | None = None
+    garment_length: str | None = None
+    garment_details: str | None = None

@@ -174,6 +174,34 @@ FLUX_STILL_LORA_REQUIRED_VARS = FLUX_STILL_REQUIRED_VARS | {
     "LORA_CLIP_STRENGTH",
 }
 
+QWEN_GARMENT_REQUIRED_VARS = {
+    "QWEN_UNET_NAME",
+    "QWEN_CLIP_NAME",
+    "QWEN_VAE_NAME",
+    "QWEN_LORA_NAME",
+    "TRYON_INPUT_IMAGE",
+    "TRYON_PROMPT",
+    "TRYON_NEGATIVE",
+    "TRYON_SEED",
+    "TRYON_FILENAME_PREFIX",
+}
+
+WAN22_5B_I2V_REQUIRED_VARS = {
+    "WAN_UNET_NAME",
+    "WAN_CLIP_NAME",
+    "WAN_VAE_NAME",
+    "VIDEO_SOURCE_IMAGE",
+    "VIDEO_PROMPT",
+    "VIDEO_NEGATIVE",
+    "VIDEO_WIDTH",
+    "VIDEO_HEIGHT",
+    "VIDEO_FRAMES",
+    "VIDEO_FPS",
+    "VIDEO_SEED",
+    "VIDEO_STEPS",
+    "VIDEO_FILENAME_PREFIX",
+}
+
 # Split-weight path (flux_still_character_split_v1 / ..._lora_split_v1). BF16
 # Flux.1-dev only ships as a bare diffusion model, so the text encoders and VAE
 # load separately instead of coming out of a single checkpoint file.

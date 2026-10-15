@@ -28,6 +28,23 @@ def test_pins_for_krea_include_encoders_and_unet():
     assert "Krea" in PROFILE_ENV["krea"]["INSTANTIMPACT_TRAIN_BASE_MODEL"]
 
 
+def test_marketing_profiles_pin_all_required_models():
+    garment = {p.filename for p in pins_for_profile("garment")}
+    assert {
+        "qwen_image_edit_fp8_e4m3fn.safetensors",
+        "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "qwen_image_vae.safetensors",
+        "Qwen-Image-Edit-Lightning-4steps-V1.0-bf16.safetensors",
+    } <= garment
+    video = {p.filename for p in pins_for_profile("video")}
+    assert {
+        "wan2.2_ti2v_5B_fp16.safetensors",
+        "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "wan2.2_vae.safetensors",
+    } <= video
+    assert PROFILE_ENV["video"]["INSTANTIMPACT_ENABLE_VIDEO"] == "true"
+
+
 def test_inspect_mock_skips_disk():
     report = inspect_flux_still(
         FluxRuntime(

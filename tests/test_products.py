@@ -101,6 +101,27 @@ def test_create_list_delete_product(client: TestClient):
     assert deleted.json()["deleted"] is True
 
 
+def test_create_garment_product(client: TestClient):
+    created = client.post(
+        "/api/products",
+        data={
+            "name": "Ruby Wrap Dress",
+            "product_kind": "garment",
+            "garment_category": "wrap dress",
+            "garment_color": "ruby red",
+            "garment_material": "silk",
+            "garment_fit": "fitted waist",
+            "garment_details": "gold buckle and asymmetric hem",
+        },
+        files={"image": ("dress.png", _png_bytes((150, 20, 40)), "image/png")},
+    )
+    assert created.status_code == 200, created.text
+    meta = created.json()["meta"]
+    assert meta["product_kind"] == "garment"
+    assert meta["garment"]["category"] == "wrap dress"
+    assert meta["garment"]["material"] == "silk"
+
+
 def test_still_batch_with_product_ref(client: TestClient):
     c = _create_attested(client)
     cid = c["id"]

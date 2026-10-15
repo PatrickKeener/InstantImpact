@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Download pinned Flux still weights into a ComfyUI models tree.
+"""Download pinned generation weights into a ComfyUI models tree.
 
 Setup-only. Runtime generation stays offline.
 
   python scripts/bootstrap_models.py --profile krea --i-accept-licenses
   python scripts/bootstrap_models.py --profile bf16 --dry-run
   python scripts/bootstrap_models.py --profile fp8 --i-accept-licenses
+  python scripts/bootstrap_models.py --profile garment --i-accept-licenses
+  python scripts/bootstrap_models.py --profile video --i-accept-licenses
 
 Gated Black Forest Labs repos need INSTANTIMPACT_HF_TOKEN or HF_TOKEN
 (FLUX.1-dev / FLUX.1-Krea-dev license accepted on Hugging Face).
@@ -157,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--i-accept-licenses",
         action="store_true",
-        help="Required for downloads. Accepts each pin's license (BFL FLUX.1 [dev]).",
+        help="Required for downloads. Accepts each selected model card/license.",
     )
     parser.add_argument("--force", action="store_true", help="Re-download files that already exist")
     args = parser.parse_args(argv)
@@ -187,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.dry_run and not args.i_accept_licenses:
         raise SystemExit(
             "Refusing to download without --i-accept-licenses. "
-            "FLUX.1 [dev] and Krea are non-commercial; you must accept their cards."
+            "Review and accept every selected model card/license first."
         )
 
     for pin in pins:

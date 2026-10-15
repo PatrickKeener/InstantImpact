@@ -11,8 +11,11 @@
 | `character_lora` | Per-character | Local train (AI Toolkit) | ~50–300 MB | derivative | per train | per character |
 | `pulid_flux` | Flux identity adapter | [ByteDance PuLID-FLUX](https://huggingface.co/guozinan/PuLID) `pulid_flux_v0.9.1.safetensors` | ~1 GB | see HF card | operator verify | optional; Studio / `INSTANTIMPACT_PULID_MODEL` |
 | `upscale_model` | Pixel hi-res | e.g. `4x-UltraSharp.pth` in Comfy `models/upscale_models` | ~50–100 MB | see source | operator verify | optional; lanczos if unset |
+| `qwen-image-edit` | Local garment reference editing | [Comfy-Org/Qwen-Image-Edit_ComfyUI](https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI) | ~29 GB with encoder/VAE/LoRA | see source cards | operator verify | `--profile garment` |
+| `wan22-ti2v-5b` | Silent vertical I2V | [Comfy-Org/Wan_2.2_ComfyUI_Repackaged](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged) | ~19 GB with encoder/VAE | see source cards | operator verify | `--profile video` |
 
 **Bootstrap (setup, networked):** `python scripts/bootstrap_models.py --profile krea --i-accept-licenses`  
+Optional marketing profiles: `--profile garment` and `--profile video`.
 Requires `INSTANTIMPACT_COMFY_DIR` and, for gated BFL files, `INSTANTIMPACT_HF_TOKEN` after you accept the license on Hugging Face.
 
 **Comfy path (split / Krea):** UNET in `models/diffusion_models/`, CLIP/T5 in `models/clip/` or `models/text_encoders/`, VAE in `models/vae/`. Packed FP8 rollback still uses `models/checkpoints/`.

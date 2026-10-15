@@ -148,6 +148,37 @@ VITE_API_PROXY=http://127.0.0.1:8001 npm run dev -- --host 0.0.0.0 --port 5173
 
 Workflow template: `workflows/flux_still_character_v1.json` (CheckpointLoaderSimple FP8 path).
 
+### Garment references and vertical marketing video
+
+Install the optional local model profiles once on nemesis:
+
+```bash
+cd /home/pkeener/InstantImpact
+.venv/bin/python scripts/bootstrap_models.py --profile garment --i-accept-licenses
+.venv/bin/python scripts/bootstrap_models.py --profile video --i-accept-licenses
+```
+
+The garment profile installs Qwen Image Edit FP8 plus its vision encoder, VAE,
+and four-step LoRA (about 29 GB total). The video profile installs Wan 2.2
+TI2V-5B, UMT5 FP8, and the Wan VAE (about 19 GB total). Uploaded clothing is
+used as a visual reference after the FLUX character still is generated. Exact
+logos, typography, seams, and patterns still require human review.
+
+Enable video in the existing `.env` and restart:
+
+```text
+INSTANTIMPACT_ENABLE_VIDEO=true
+INSTANTIMPACT_VIDEO_TIMEOUT=3600
+```
+
+```bash
+bash scripts/ii restart
+```
+
+Video output is a silent 480×832 MP4, 81 frames at 16 fps (about five seconds).
+Generation uses the same exclusive GPU handoff as stills. Keep the silent
+master for later voice, captions, audio muxing, and lip sync.
+
 ---
 
 ## Alternative: split chamber + nemesis (not recommended for MVP)

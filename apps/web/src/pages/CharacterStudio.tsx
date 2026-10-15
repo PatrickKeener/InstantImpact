@@ -20,6 +20,29 @@ const PRODUCT_PLACEMENT_OPTIONS = [
   { id: "wearing", label: "wearing" },
 ] as const;
 
+const VIDEO_MOTION_PRESETS = [
+  {
+    id: "subtle_push",
+    label: "Subtle camera push",
+    prompt: "gentle breathing, slight natural head movement, slow smooth camera push-in",
+  },
+  {
+    id: "natural_turn",
+    label: "Natural turn",
+    prompt: "she slowly turns toward camera, soft confident expression, natural hair movement",
+  },
+  {
+    id: "product_present",
+    label: "Product presentation",
+    prompt: "she naturally presents the product toward camera, subtle smile, slow commercial camera orbit",
+  },
+  {
+    id: "fabric_motion",
+    label: "Fabric movement",
+    prompt: "subtle body turn and gentle fabric movement showing the garment fit and material, stable camera",
+  },
+] as const;
+
 type BriefLine = {
   theme: string;
   count: number;
@@ -30,6 +53,8 @@ type BriefLine = {
   useProduct: boolean;
   productId: string;
   productPlacement: string;
+  garmentStyling: string;
+  accessories: string;
 };
 
 const FILTERS = ["all", "pending", "approved", "rejected"] as const;
@@ -112,6 +137,8 @@ export default function CharacterStudio() {
       useProduct: false,
       productId: "",
       productPlacement: "holding",
+      garmentStyling: "",
+      accessories: "",
     },
   ]);
   const [loraPath, setLoraPath] = useState("");
@@ -135,6 +162,7 @@ export default function CharacterStudio() {
   const [captionAssetId, setCaptionAssetId] = useState("");
   const [fluxKnobs, setFluxKnobs] = useState<FluxKnobs>(DEFAULT_FLUX_KNOBS);
   const [fluxDirty, setFluxDirty] = useState(false);
+  const [videoMotion, setVideoMotion] = useState<string>(VIDEO_MOTION_PRESETS[0].prompt);
 
   const refresh = useCallback(async () => {
     if (!id) return;
@@ -175,11 +203,17 @@ export default function CharacterStudio() {
     return () => clearInterval(t);
   }, [activeJobs.length, refresh]);
 
+  const stillAssets = useMemo(
+    () => assets.filter((a) => a.kind !== "video"),
+    [assets]
+  );
+  const videos = useMemo(() => assets.filter((a) => a.kind === "video"), [assets]);
   const visible = useMemo(() => {
-    const list = filter === "all" ? assets : assets.filter((a) => a.decision === filter);
+    const list =
+      filter === "all" ? stillAssets : stillAssets.filter((a) => a.decision === filter);
     if (assetSort !== "match") return list;
     return [...list].sort((a, b) => (b.consistency_score ?? -1) - (a.consistency_score ?? -1));
-  }, [assets, filter, assetSort]);
+  }, [stillAssets, filter, assetSort]);
 
   useEffect(() => {
     if (lightbox === null) return;
@@ -315,6 +349,11 @@ export default function CharacterStudio() {
           product_id: l.useProduct && l.productId ? l.productId : undefined,
           product_placement:
             l.useProduct && l.productId ? l.productPlacement || "holding" : undefined,
+          garment_styling:
+            l.useProduct && l.productPlacement === "wearing"
+              ? l.garmentStyling || undefined
+              : undefined,
+          accessories: l.accessories || undefined,
         })),
       });
       await refresh();
@@ -457,12 +496,33 @@ export default function CharacterStudio() {
   }
 
   async function removeAsset(assetId: string) {
-    if (!window.confirm("Permanently delete this image from the library and disk?")) return;
+    if (!window.confirm("Permanently delete this asset from the library and disk?")) return;
     setBusy(true);
     setError(null);
     try {
       await api.deleteAsset(assetId, true);
       setLightbox(null);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createVideo(assetId: string, motion: string = videoMotion) {
+    if (!id) return;
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const job = await api.createVideo(id, assetId, {
+        motion_prompt: motion.trim(),
+        frames: 81,
+        fps: 16,
+        steps: 20,
+      });
+      setInfo(`Vertical video queued (${job.id.slice(0, 8)}…).`);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -612,7 +672,7 @@ export default function CharacterStudio() {
   }
 
   const unlocked = character.status === "bootstrap" || character.status === "draft";
-  const approvedCount = assets.filter((a) => a.decision === "approved").length;
+  const approvedCount = stillAssets.filter((a) => a.decision === "approved").length;
   const matchingCount = lora?.matching_stills ?? approvedCount;
   const hasLora = Boolean(lora?.lora_file_present || lora?.comfy_lora_name);
   const trainJob = jobs.find((j) => j.type === "lora_train");
@@ -927,7 +987,15 @@ export default function CharacterStudio() {
                     value={line.productId}
                     onChange={(e) => {
                       const next = [...lines];
-                      next[idx] = { ...line, productId: e.target.value };
+                      const selectedProduct = products.find((p) => p.id === e.target.value);
+                      next[idx] = {
+                        ...line,
+                        productId: e.target.value,
+                        productPlacement:
+                          selectedProduct?.meta?.product_kind === "garment"
+                            ? "wearing"
+                            : line.productPlacement,
+                      };
                       setLines(next);
                     }}
                   >
@@ -970,6 +1038,35 @@ export default function CharacterStudio() {
                     })()}
                 </div>
               )}
+              {line.useProduct &&
+                line.productPlacement === "wearing" &&
+                products.find((p) => p.id === line.productId)?.meta?.product_kind === "garment" && (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <input
+                      className="input"
+                      value={line.garmentStyling}
+                      placeholder="fit/styling instructions (tucked in, open jacket, high waist)"
+                      onChange={(e) => {
+                        const next = [...lines];
+                        next[idx] = { ...line, garmentStyling: e.target.value };
+                        setLines(next);
+                      }}
+                    />
+                    <input
+                      className="input"
+                      value={line.accessories}
+                      placeholder="accessories (shoes, jewelry, bag)"
+                      onChange={(e) => {
+                        const next = [...lines];
+                        next[idx] = { ...line, accessories: e.target.value };
+                        setLines(next);
+                      }}
+                    />
+                    <p className="text-xs text-accent-soft sm:col-span-2">
+                      Garment reference mode will transfer this product onto the generated character.
+                    </p>
+                  </div>
+                )}
             </div>
           ))}
           <div className="flex flex-wrap gap-2">
@@ -989,6 +1086,8 @@ export default function CharacterStudio() {
                     useProduct: false,
                     productId: "",
                     productPlacement: "holding",
+                    garmentStyling: "",
+                    accessories: "",
                   },
                 ])
               }
@@ -1153,6 +1252,91 @@ export default function CharacterStudio() {
           nearest-exact). After a face lock, expand img2imgs the locked still. PuLID auto-enables
           on expand when weights exist under models/pulid; a filename here forces it on.
         </p>
+      </section>
+
+      <section className="card space-y-4 p-5">
+        <div>
+          <h2 className="font-display text-xl">Marketing videos</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Silent 9:16 Wan 2.2 clips. Download the clean MP4 now; voice and lip sync can be
+            added as a later post-processing stage.
+          </p>
+        </div>
+        {videos.length === 0 ? (
+          <p className="text-sm text-slate-500">
+            Approve a still, then choose Create vertical video.
+          </p>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {videos.map((video) => {
+              const sourceId =
+                typeof video.meta?.source_asset_id === "string"
+                  ? video.meta.source_asset_id
+                  : "";
+              const motion =
+                typeof video.meta?.motion_prompt === "string"
+                  ? video.meta.motion_prompt
+                  : VIDEO_MOTION_PRESETS[0].prompt;
+              return (
+                <article
+                  key={video.id}
+                  className="overflow-hidden rounded-xl border border-white/10 bg-black/30"
+                >
+                  <video
+                    className="aspect-[9/16] w-full bg-black object-contain"
+                    src={api.mediaUrl(video.path)}
+                    poster={video.thumb_path ? api.mediaUrl(video.thumb_path) : undefined}
+                    controls
+                    preload="metadata"
+                  />
+                  <div className="space-y-2 p-3">
+                    <p className="line-clamp-2 text-xs text-slate-400">{motion}</p>
+                    <div className="flex flex-wrap gap-1">
+                      <button
+                        className="btn-ghost text-xs"
+                        disabled={busy || !!deciding[video.id]}
+                        onClick={() => void decide(video.id, "approved")}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        className="btn-ghost text-xs"
+                        disabled={busy || !!deciding[video.id]}
+                        onClick={() => void decide(video.id, "rejected")}
+                      >
+                        Reject
+                      </button>
+                      <button
+                        className="btn-ghost text-xs"
+                        disabled={busy || !sourceId}
+                        onClick={() => sourceId && void createVideo(sourceId, motion)}
+                      >
+                        Regenerate
+                      </button>
+                      <a
+                        className="btn-ghost text-xs"
+                        href={api.mediaUrl(video.path)}
+                        download
+                      >
+                        Download
+                      </a>
+                      <button
+                        className="btn-ghost text-xs text-red-300"
+                        disabled={busy}
+                        onClick={() => void removeAsset(video.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <div className="text-[10px] capitalize text-slate-500">
+                      {video.decision} · {String(video.meta?.duration_seconds || "5")}s · silent
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       <section className="card space-y-4 p-5">
@@ -1615,6 +1799,16 @@ cd /home/pkeener/InstantImpact/apps/worker
                     🗑
                   </button>
                 </div>
+                {a.decision === "approved" && (
+                  <button
+                    type="button"
+                    className="btn-ghost w-full px-2 py-1 text-[10px] text-accent-soft"
+                    disabled={busy}
+                    onClick={() => void createVideo(a.id)}
+                  >
+                    Create vertical video
+                  </button>
+                )}
                 <div className="text-center text-[10px] capitalize text-slate-400">{a.decision}</div>
               </div>
             </div>
@@ -1738,6 +1932,45 @@ cd /home/pkeener/InstantImpact/apps/worker
                   <div className="text-xs text-rose-400">Negative</div>
                   <p className="mt-1 text-xs text-slate-400">{lbAsset.prompt_negative || "—"}</p>
                 </div>
+                {lbAsset.decision === "approved" && (
+                  <div className="space-y-2 rounded-xl border border-white/10 p-3">
+                    <div className="text-xs font-medium text-accent-soft">
+                      Vertical marketing video
+                    </div>
+                    <select
+                      className="input"
+                      value={
+                        VIDEO_MOTION_PRESETS.find((preset) => preset.prompt === videoMotion)?.id ||
+                        "custom"
+                      }
+                      onChange={(e) => {
+                        const preset = VIDEO_MOTION_PRESETS.find(
+                          (candidate) => candidate.id === e.target.value
+                        );
+                        if (preset) setVideoMotion(preset.prompt);
+                      }}
+                    >
+                      {VIDEO_MOTION_PRESETS.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.label}
+                        </option>
+                      ))}
+                      <option value="custom">Custom</option>
+                    </select>
+                    <textarea
+                      className="input min-h-20"
+                      value={videoMotion}
+                      onChange={(e) => setVideoMotion(e.target.value)}
+                    />
+                    <button
+                      className="btn-primary text-xs"
+                      disabled={busy || !videoMotion.trim()}
+                      onClick={() => void createVideo(lbAsset.id)}
+                    >
+                      Create 5-second 9:16 clip
+                    </button>
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2">
                   <button
                     className="btn-primary text-xs"

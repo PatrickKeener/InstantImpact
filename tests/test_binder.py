@@ -32,6 +32,38 @@ def test_flux_template_has_required_placeholders():
         assert template[sampler["inputs"]["positive"][0]]["class_type"] == "CLIPTextEncodeFlux"
 
 
+def test_qwen_garment_template_has_required_placeholders():
+    from instantimpact_comfy.binder import QWEN_GARMENT_REQUIRED_VARS
+
+    root = Path(__file__).resolve().parents[1]
+    wf = load_workflow(root / "workflows" / "qwen_garment_tryon_v1.json")
+    assert validate_placeholders(wf, QWEN_GARMENT_REQUIRED_VARS) == []
+    assert {
+        node["class_type"]
+        for node in wf.values()
+        if isinstance(node, dict) and "class_type" in node
+    } >= {
+        "TextEncodeQwenImageEdit",
+        "KSampler",
+        "SaveImage",
+    }
+
+
+def test_wan_vertical_video_template_has_required_placeholders():
+    from instantimpact_comfy.binder import WAN22_5B_I2V_REQUIRED_VARS
+
+    root = Path(__file__).resolve().parents[1]
+    wf = load_workflow(root / "workflows" / "wan22_5b_i2v_vertical_v1.json")
+    assert validate_placeholders(wf, WAN22_5B_I2V_REQUIRED_VARS) == []
+    save = next(node for node in wf.values() if node.get("class_type") == "SaveVideo")
+    latent = next(
+        node for node in wf.values() if node.get("class_type") == "Wan22ImageToVideoLatent"
+    )
+    assert save["inputs"]["video"]
+    assert latent["inputs"]["width"] == "{{VIDEO_WIDTH}}"
+    assert latent["inputs"]["height"] == "{{VIDEO_HEIGHT}}"
+
+
 def test_detail_lora_is_chained_before_sampler():
     from instantimpact_comfy.binder import DETAIL_LORA_NODE_ID, FLUX_STILL_LORA_REQUIRED_VARS
 

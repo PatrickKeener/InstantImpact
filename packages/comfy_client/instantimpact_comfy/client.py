@@ -8,7 +8,6 @@ import uuid
 from typing import Any
 
 import httpx
-
 from instantimpact_common.offline import enforce_strict_offline
 
 
@@ -175,6 +174,42 @@ class ComfyClient:
                         }
                     )
         return images
+
+    @staticmethod
+    def files_from_history(entry: dict[str, Any]) -> list[dict[str, str]]:
+        """Extract saved image/video/audio files from a completed history entry."""
+        files: list[dict[str, str]] = []
+        outputs = entry.get("outputs") or {}
+        for _node_id, node_out in outputs.items():
+            if not isinstance(node_out, dict):
+                continue
+            for key in ("videos", "gifs", "images", "audio", "files"):
+                for value in node_out.get(key) or []:
+                    if isinstance(value, dict) and value.get("filename"):
+                        files.append(
+                            {
+                                "filename": str(value["filename"]),
+                                "subfolder": str(value.get("subfolder") or ""),
+                                "type": str(value.get("type") or "output"),
+                                "kind": key,
+                            }
+                        )
+            # New SaveVideo builds may return one descriptor instead of a list.
+            for value in node_out.values():
+                if (
+                    isinstance(value, dict)
+                    and value.get("filename")
+                    and not any(f["filename"] == str(value["filename"]) for f in files)
+                ):
+                    files.append(
+                        {
+                            "filename": str(value["filename"]),
+                            "subfolder": str(value.get("subfolder") or ""),
+                            "type": str(value.get("type") or "output"),
+                            "kind": "file",
+                        }
+                    )
+        return files
 
     async def upload_image(
         self, data: bytes, filename: str, *, overwrite: bool = True

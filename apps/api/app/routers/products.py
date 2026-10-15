@@ -41,6 +41,16 @@ async def create_product(
     name: str = Form(...),
     description: str | None = Form(None),
     brand: str | None = Form(None),
+    product_kind: str = Form("product"),
+    garment_category: str | None = Form(None),
+    garment_color: str | None = Form(None),
+    garment_material: str | None = Form(None),
+    garment_pattern: str | None = Form(None),
+    garment_fit: str | None = Form(None),
+    garment_sleeves: str | None = Form(None),
+    garment_neckline: str | None = Form(None),
+    garment_length: str | None = Form(None),
+    garment_details: str | None = Form(None),
     image: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
@@ -51,6 +61,18 @@ async def create_product(
             upload=image,
             description=description,
             brand=brand,
+            product_kind=product_kind,
+            garment={
+                "category": garment_category,
+                "color": garment_color,
+                "material": garment_material,
+                "pattern": garment_pattern,
+                "fit": garment_fit,
+                "sleeves": garment_sleeves,
+                "neckline": garment_neckline,
+                "length": garment_length,
+                "details": garment_details,
+            },
         )
     except product_svc.ProductServiceError as e:
         raise HTTPException(status_code=e.status_code, detail=e.message) from e
@@ -69,6 +91,33 @@ async def update_product(
             name=payload.name,
             description=payload.description,
             brand=payload.brand,
+            product_kind=payload.product_kind,
+            garment={
+                "category": payload.garment_category,
+                "color": payload.garment_color,
+                "material": payload.garment_material,
+                "pattern": payload.garment_pattern,
+                "fit": payload.garment_fit,
+                "sleeves": payload.garment_sleeves,
+                "neckline": payload.garment_neckline,
+                "length": payload.garment_length,
+                "details": payload.garment_details,
+            }
+            if any(
+                value is not None
+                for value in (
+                    payload.garment_category,
+                    payload.garment_color,
+                    payload.garment_material,
+                    payload.garment_pattern,
+                    payload.garment_fit,
+                    payload.garment_sleeves,
+                    payload.garment_neckline,
+                    payload.garment_length,
+                    payload.garment_details,
+                )
+            )
+            else None,
         )
     except product_svc.ProductServiceError as e:
         raise HTTPException(status_code=e.status_code, detail=e.message) from e
