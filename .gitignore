@@ -43,3 +43,6 @@ models/
 # Logs / repro
 *.log
 jobs/
+
+# Native stack runtime (pids, logs)
+.run/
