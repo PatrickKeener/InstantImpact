@@ -214,6 +214,11 @@ def likeness_for_asset(asset: Asset, refs_dir: Path | None) -> float | None:
     live = _score_against_primary(src, refs_dir) if src else None
     if live is not None:
         return live
+    return stored_likeness_for_asset(asset)
+
+
+def stored_likeness_for_asset(asset: Asset) -> float | None:
+    """Return the score recorded when the still was generated, without image analysis."""
     raw = asset.consistency_score
     try:
         return float(raw) if raw is not None else None

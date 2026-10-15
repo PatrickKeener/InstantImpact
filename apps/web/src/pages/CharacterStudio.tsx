@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, AdCopyResult, ApprovedSet, Asset, Character, Job, LoraStatus, Product } from "../api";
 
@@ -99,6 +99,8 @@ export default function CharacterStudio() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deciding, setDeciding] = useState<Record<string, boolean>>({});
+  const decidingRef = useRef(new Set<string>());
   const [lines, setLines] = useState<BriefLine[]>([
     {
       theme: "casual_bedroom",
@@ -412,17 +414,45 @@ export default function CharacterStudio() {
   }
 
   async function decide(assetId: string, decision: string, force = false) {
+    if (decidingRef.current.has(assetId)) return;
+    const previousDecision = assets.find((a) => a.id === assetId)?.decision;
+    decidingRef.current.add(assetId);
+    setDeciding((current) => ({ ...current, [assetId]: true }));
     setError(null);
+    setAssets((current) =>
+      current.map((a) => (a.id === assetId ? { ...a, decision } : a))
+    );
     try {
       await api.setDecision(assetId, decision, force);
       setApproveBlocked(null);
-      await refresh();
+      if (id) {
+        void Promise.all([api.getCharacter(id), api.loraStatus(id)])
+          .then(([c, l]) => {
+            setCharacter(c);
+            setLora(l);
+          })
+          .catch(() => undefined);
+      }
     } catch (e) {
+      if (previousDecision) {
+        setAssets((current) =>
+          current.map((a) =>
+            a.id === assetId ? { ...a, decision: previousDecision } : a
+          )
+        );
+      }
       const msg = e instanceof Error ? e.message : String(e);
       if (decision === "approved" && msg.startsWith("409")) {
         setApproveBlocked({ id: assetId, message: msg });
       }
       setError(msg);
+    } finally {
+      decidingRef.current.delete(assetId);
+      setDeciding((current) => {
+        const next = { ...current };
+        delete next[assetId];
+        return next;
+      });
     }
   }
 
@@ -1563,7 +1593,7 @@ cd /home/pkeener/InstantImpact/apps/worker
                   <button
                     type="button"
                     className="btn-ghost flex-1 px-1 py-1 text-[10px]"
-                    disabled={busy}
+                    disabled={busy || deciding[a.id]}
                     onClick={() => void decide(a.id, "approved")}
                   >
                     ✓
@@ -1571,7 +1601,7 @@ cd /home/pkeener/InstantImpact/apps/worker
                   <button
                     type="button"
                     className="btn-ghost flex-1 px-1 py-1 text-[10px]"
-                    disabled={busy}
+                    disabled={busy || deciding[a.id]}
                     onClick={() => void decide(a.id, "rejected")}
                   >
                     ✕
@@ -1709,18 +1739,27 @@ cd /home/pkeener/InstantImpact/apps/worker
                   <p className="mt-1 text-xs text-slate-400">{lbAsset.prompt_negative || "—"}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button className="btn-primary text-xs" onClick={() => void decide(lbAsset.id, "approved")}>
+                  <button
+                    className="btn-primary text-xs"
+                    disabled={!!deciding[lbAsset.id]}
+                    onClick={() => void decide(lbAsset.id, "approved")}
+                  >
                     Approve (A)
                   </button>
                   {approveBlocked?.id === lbAsset.id && (
                     <button
                       className="btn-ghost text-xs text-amber-200"
+                      disabled={!!deciding[lbAsset.id]}
                       onClick={() => void decide(lbAsset.id, "approved", true)}
                     >
                       Approve anyway
                     </button>
                   )}
-                  <button className="btn-ghost text-xs" onClick={() => void decide(lbAsset.id, "rejected")}>
+                  <button
+                    className="btn-ghost text-xs"
+                    disabled={!!deciding[lbAsset.id]}
+                    onClick={() => void decide(lbAsset.id, "rejected")}
+                  >
                     Reject (R)
                   </button>
                   <button

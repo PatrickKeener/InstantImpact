@@ -477,12 +477,13 @@ async def lora_status(db: AsyncSession, character_id: str) -> dict[str, Any]:
 
     n_approved = len(approved)
     lock = identity_svc.read_lock(version)
-    refs_dir = layout.refs_dir(c.id, version.version_int) if version else None
     matching_stills = n_approved
     if lock:
         matching_stills = 0
         for a in approved:
-            score = identity_svc.likeness_for_asset(a, refs_dir)
+            # This endpoint is polled by the studio. Live face analysis for every
+            # approved image made all UI refreshes block for seconds.
+            score = identity_svc.stored_likeness_for_asset(a)
             if score is not None and score < identity_svc.LIKENESS_TRAIN_MIN:
                 continue
             matching_stills += 1
