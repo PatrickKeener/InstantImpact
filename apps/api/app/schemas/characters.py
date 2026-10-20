@@ -185,6 +185,9 @@ class AdCopyResponse(BaseModel):
     cta: str
     variants: list[AdCopyVariant] = Field(default_factory=list)
     voice: dict[str, Any] = Field(default_factory=dict)
+    product_id: str | None = None
+    theme: str | None = None
+    caption_fallback: str | None = None
 
 
 class AssetCaptionSaveRequest(BaseModel):

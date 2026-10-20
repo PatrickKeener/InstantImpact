@@ -1040,7 +1040,7 @@ Optional future: `POSE_IMAGE_PATH`.
 - PuLID-Flux (or current Flux ID node set chosen at implement)
 - Any manager-disabled extras
 
-**Health:** `GET /system/health` reports `pipelines.flux_still: ok|missing_nodes|missing_weights`. Enqueue of Flux stills **fails closed** if not `ok`.
+**Health:** `GET /system/health` reports `pipelines.flux_still`, `garment_tryon`, and `wan_video` (`ok|mock|idle|disabled|missing_nodes|missing_weights`). Enqueue **fails closed** if the required pipeline is missing weights.
 
 ### Smoke test (PR acceptance)
 

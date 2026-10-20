@@ -244,8 +244,10 @@ async def delete_product(db: AsyncSession, product_id: str) -> dict:
 
 def resolve_product_fields(product: Product, placement: str | None) -> dict:
     """Denormalize product into StillUnitRequest fields."""
-    place = normalize_placement(placement)
     meta = product.meta_json or {}
+    if not (placement or "").strip() and meta.get("product_kind") == "garment":
+        placement = "wearing"
+    place = normalize_placement(placement)
     garment = dict(meta.get("garment") or {})
     desc_parts = []
     if product.brand:

@@ -17,6 +17,7 @@ from worker.gpu_lock import GpuLock, is_cancel_requested
 from worker.gpu_services import GpuServiceError
 from worker.gpu_session import GpuSession
 from worker.paths import resolve_request_json
+from worker.tasks.garment import apply_garment_tryon, garment_tryon_requested
 
 log = logging.getLogger("instantimpact.worker.stills")
 
@@ -59,6 +60,8 @@ async def process_still_job(
 
     if is_mock:
         await _publish(redis, {"job_id": job_id, "event": "running", "message": "mock generation"})
+        if job_type == "garment_tryon":
+            return await _run_mock_tryon(redis, snapshot, request_path=path)
         return await _run_mock(redis, snapshot, request_path=path)
 
     lock = GpuLock(redis, holder_id=job_id)
@@ -101,6 +104,8 @@ async def process_still_job(
 
     try:
         await _publish(redis, {"job_id": job_id, "event": "running", "message": message})
+        if job_type == "garment_tryon":
+            return await _run_tryon_only(redis, snapshot, request_path=path)
         return await _run_comfy(redis, snapshot, request_path=path)
     except asyncio.CancelledError:
         # arq's job_timeout (or a worker shutdown) killed us mid-batch. Without
@@ -192,129 +197,6 @@ def _score_against_refs(still_path: Path, refs: Path | None) -> float | None:
         return best_ref_similarity(still_path, refs)
     except Exception:
         return None
-
-
-def _garment_tryon_requested(item: dict[str, Any]) -> bool:
-    return (
-        item.get("product_kind") == "garment"
-        and item.get("product_placement") == "wearing"
-        and bool(item.get("product_ref_path"))
-    )
-
-
-async def _apply_garment_tryon(
-    *,
-    client: Any,
-    workflows_dir: Path,
-    data_dir: Path,
-    still_path: Path,
-    item: dict[str, Any],
-    job_id: str,
-    item_index: int,
-    seed: int,
-) -> None:
-    """Use local Qwen Image Edit to transfer an uploaded garment onto a generated still."""
-    from instantimpact_comfy.binder import (
-        QWEN_GARMENT_REQUIRED_VARS,
-        bind_workflow,
-        load_workflow,
-        nodes_only,
-        validate_placeholders,
-    )
-    from PIL import Image, ImageDraw
-
-    garment_path = Path(str(item["product_ref_path"]))
-    if not garment_path.is_absolute():
-        garment_path = data_dir / str(garment_path).replace("\\", "/").lstrip("/")
-    if not garment_path.is_file():
-        raise RuntimeError(f"Garment reference is missing: {garment_path}")
-
-    person = Image.open(still_path).convert("RGB")
-    garment = Image.open(garment_path).convert("RGB")
-    panel_w = max(220, int(person.width * 0.34))
-    panel_h = max(260, int(person.height * 0.42))
-    garment.thumbnail((panel_w - 24, panel_h - 48))
-    composite = person.copy()
-    draw = ImageDraw.Draw(composite)
-    left = person.width - panel_w - 16
-    top = person.height - panel_h - 16
-    draw.rounded_rectangle(
-        (left, top, person.width - 16, person.height - 16),
-        radius=12,
-        fill=(245, 245, 245),
-        outline=(20, 20, 20),
-        width=3,
-    )
-    gx = left + (panel_w - garment.width) // 2
-    gy = top + 28 + (panel_h - 40 - garment.height) // 2
-    composite.paste(garment, (gx, gy))
-    draw.text((left + 10, top + 8), "GARMENT REFERENCE", fill=(10, 10, 10))
-    buf = io.BytesIO()
-    composite.save(buf, "PNG")
-    uploaded = await client.upload_image(
-        buf.getvalue(), f"ii_tryon_{job_id[:8]}_{item_index:03d}.png"
-    )
-
-    garment_bits = ", ".join(
-        f"{key}: {value}" for key, value in (item.get("garment") or {}).items() if value
-    )
-    prompt = (
-        "Edit the person in the image so she is wearing the garment shown in the "
-        "GARMENT REFERENCE panel. Preserve her face, hair, body, pose, hands, background, "
-        "camera framing, and photorealistic lighting. Reproduce the garment's exact color, "
-        "material, pattern, cut, seams, trim, and visible branding. Remove the reference "
-        "panel completely from the final image."
-    )
-    if garment_bits:
-        prompt += f" Garment specification: {garment_bits}."
-    if item.get("garment_styling"):
-        prompt += f" Styling and fit: {item['garment_styling']}."
-    if item.get("accessories"):
-        prompt += f" Accessories: {item['accessories']}."
-
-    wf_path = workflows_dir / "qwen_garment_tryon_v1.json"
-    template = load_workflow(wf_path)
-    errors = validate_placeholders(template, QWEN_GARMENT_REQUIRED_VARS)
-    if errors:
-        raise RuntimeError("; ".join(errors))
-    variables = {
-        "QWEN_UNET_NAME": os.environ.get(
-            "INSTANTIMPACT_QWEN_EDIT_UNET", "qwen_image_edit_fp8_e4m3fn.safetensors"
-        ),
-        "QWEN_CLIP_NAME": os.environ.get(
-            "INSTANTIMPACT_QWEN_EDIT_CLIP", "qwen_2.5_vl_7b_fp8_scaled.safetensors"
-        ),
-        "QWEN_VAE_NAME": os.environ.get(
-            "INSTANTIMPACT_QWEN_EDIT_VAE", "qwen_image_vae.safetensors"
-        ),
-        "QWEN_LORA_NAME": os.environ.get(
-            "INSTANTIMPACT_QWEN_EDIT_LORA",
-            "Qwen-Image-Edit-Lightning-4steps-V1.0-bf16.safetensors",
-        ),
-        "TRYON_INPUT_IMAGE": uploaded,
-        "TRYON_PROMPT": prompt,
-        "TRYON_NEGATIVE": (
-            "reference panel, split screen, collage, duplicate person, changed face, "
-            "changed pose, wrong garment, wrong color, extra limbs, text overlay"
-        ),
-        "TRYON_SEED": seed,
-        "TRYON_FILENAME_PREFIX": f"ii_tryon_{job_id[:8]}_{item_index:03d}",
-    }
-    prompt_id = await client.queue_prompt(nodes_only(bind_workflow(template, variables)))
-    entry = await client.wait_for_prompt(prompt_id, timeout=client.timeout)
-    images = client.images_from_history(entry)
-    if not images:
-        raise RuntimeError("Qwen garment workflow produced no image")
-    output = images[0]
-    raw = await client.get_image(
-        filename=output["filename"],
-        subfolder=output.get("subfolder") or "",
-        folder_type=output.get("type") or "output",
-    )
-    edited = Image.open(io.BytesIO(raw)).convert("RGB")
-    if edited.size != person.size:
-        edited = edited.resize(person.size)
-    edited.save(still_path, "PNG")
 
 
 async def _run_mock(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
@@ -460,6 +342,314 @@ async def _run_mock(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     return {"ok": True}
 
 
+def _source_still_path(data_dir: Path, item: dict[str, Any]) -> Path | None:
+    raw = item.get("source_image_path")
+    if not raw:
+        return None
+    path = Path(str(raw))
+    if not path.is_absolute():
+        path = data_dir / str(raw).replace("\\", "/").lstrip("/")
+    return path if path.is_file() else None
+
+
+async def _run_mock_tryon(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
+    """Copy the source still and paste the garment for mock dress jobs."""
+    from instantimpact_common.safety_lists import SYNTHETIC_DISCLOSURE_DEFAULT
+    from instantimpact_common.product_media import (
+        paste_product_corner,
+        product_meta_from_item,
+        resolve_product_image,
+        shot_meta_from_item,
+    )
+
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        await _publish(
+            redis,
+            {
+                "job_id": snapshot["job_id"],
+                "event": "failed",
+                "error_code": "missing_pillow",
+                "message": "Pillow is required for mock try-on",
+            },
+        )
+        return {"ok": False}
+
+    job_id = snapshot["job_id"]
+    character_id = snapshot.get("character_id") or "unknown"
+    items = snapshot.get("items") or []
+    data_dir = _resolve_data_dir(request_path)
+    out_dir = data_dir / "outputs" / character_id / job_id / "stills"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for item in items:
+        if await is_cancel_requested(redis, job_id):
+            await _publish(redis, {"job_id": job_id, "event": "cancelled"})
+            return {"ok": False, "cancelled": True}
+        item_index = int(item.get("item_index") or 0)
+        await _publish(
+            redis,
+            {"job_id": job_id, "event": "item_started", "item_index": item_index},
+        )
+        seed = int(item.get("seed") or 0) or int(uuid.uuid4().int % (2**31 - 1))
+        source = _source_still_path(data_dir, item)
+        if source is not None:
+            img = Image.open(source).convert("RGB")
+        else:
+            img = Image.new("RGB", (768, 960), color=(36, 36, 48))
+            draw = ImageDraw.Draw(img)
+            draw.text((24, 24), f"MOCK TRY-ON #{item_index}", fill=(220, 220, 230))
+        pref = resolve_product_image(data_dir, item)
+        if pref is not None:
+            try:
+                img = paste_product_corner(img, pref)
+            except Exception:
+                pass
+        w, h = img.size
+        still_name = f"still_{item_index:03d}_s{seed}.png"
+        still_path = out_dir / still_name
+        img.save(still_path, "PNG")
+        thumb_path = out_dir / f"thumb_{item_index:03d}.png"
+        tw = 192
+        th = max(1, int(192 * h / max(w, 1)))
+        img.resize((tw, th)).save(thumb_path, "PNG")
+        digest = hashlib.sha256(still_path.read_bytes()).hexdigest()
+        disclosure = {
+            "synthetic": True,
+            "ai_generated": True,
+            "age_appearance": "21+",
+            "disclosure": SYNTHETIC_DISCLOSURE_DEFAULT,
+            "job_id": job_id,
+            "seed": seed,
+            "pipeline": "mock_tryon",
+            "source_asset_id": item.get("source_asset_id"),
+            **shot_meta_from_item(item),
+            **product_meta_from_item(item),
+        }
+        still_path.with_suffix(".disclosure.json").write_text(
+            json.dumps(disclosure, indent=2), encoding="utf-8"
+        )
+        await _publish(
+            redis,
+            {
+                "job_id": job_id,
+                "event": "item_done",
+                "item_index": item_index,
+                "path": str(still_path.relative_to(data_dir)).replace("\\", "/"),
+                "thumb_path": str(thumb_path.relative_to(data_dir)).replace("\\", "/"),
+                "width": w,
+                "height": h,
+                "seed": seed,
+                "prompt_positive": item.get("extra_prompt"),
+                "prompt_negative": None,
+                "sha256": digest,
+                "pipeline": "mock_tryon",
+                "meta": disclosure,
+            },
+        )
+
+    await _publish(
+        redis,
+        {
+            "job_id": job_id,
+            "event": "completed",
+            "message": f"mock try-on done ({len(items)})",
+        },
+    )
+    return {"ok": True}
+
+
+async def _run_tryon_only(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
+    """Qwen garment try-on on a copied source still. No Flux pass."""
+    from instantimpact_comfy.client import ComfyClient
+    from instantimpact_common.offline import enforce_strict_offline
+    from instantimpact_common.product_media import product_meta_from_item, shot_meta_from_item
+    from instantimpact_common.safety_lists import SYNTHETIC_DISCLOSURE_DEFAULT
+
+    try:
+        from PIL import Image
+    except ImportError:
+        Image = None  # type: ignore[assignment]
+
+    job_id = snapshot["job_id"]
+    character_id = snapshot.get("character_id") or "unknown"
+    items = snapshot.get("items") or []
+    comfy_url = os.environ.get("INSTANTIMPACT_COMFY_URL", "http://127.0.0.1:8188")
+    strict = os.environ.get("INSTANTIMPACT_STRICT_OFFLINE", "").lower() in {"1", "true", "yes"}
+    try:
+        enforce_strict_offline(comfy_url, strict)
+    except RuntimeError as e:
+        await _publish(
+            redis,
+            {
+                "job_id": job_id,
+                "event": "failed",
+                "error_code": "strict_offline",
+                "message": str(e),
+            },
+        )
+        return {"ok": False}
+
+    workflows_dir = Path(
+        os.environ.get(
+            "INSTANTIMPACT_WORKFLOWS_DIR",
+            str(Path(__file__).resolve().parents[4] / "workflows"),
+        )
+    )
+    data_dir = _resolve_data_dir(request_path)
+    out_dir = data_dir / "outputs" / character_id / job_id / "stills"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    client = ComfyClient(
+        comfy_url, timeout=float(os.environ.get("INSTANTIMPACT_COMFY_TIMEOUT", "600"))
+    )
+    if not await client.health():
+        await _publish(
+            redis,
+            {
+                "job_id": job_id,
+                "event": "failed",
+                "error_code": "comfy_unreachable",
+                "message": f"ComfyUI not healthy at {comfy_url}",
+            },
+        )
+        return {"ok": False}
+
+    import shutil
+
+    failures = 0
+    for item in items:
+        if await is_cancel_requested(redis, job_id):
+            await _publish(redis, {"job_id": job_id, "event": "cancelled"})
+            return {"ok": False, "cancelled": True}
+        item_index = int(item.get("item_index") or 0)
+        await _publish(
+            redis,
+            {"job_id": job_id, "event": "item_started", "item_index": item_index},
+        )
+        seed = int(item.get("seed") or 0) or int(uuid.uuid4().int % (2**31 - 1))
+        source = _source_still_path(data_dir, item)
+        if source is None:
+            failures += 1
+            await _publish(
+                redis,
+                {
+                    "job_id": job_id,
+                    "event": "item_failed",
+                    "item_index": item_index,
+                    "error_code": "missing_source",
+                    "message": "Source still is missing on disk",
+                },
+            )
+            continue
+        still_name = f"still_{item_index:03d}_s{seed}.png"
+        still_path = out_dir / still_name
+        try:
+            shutil.copy2(source, still_path)
+            await apply_garment_tryon(
+                client=client,
+                workflows_dir=workflows_dir,
+                data_dir=data_dir,
+                still_path=still_path,
+                item=item,
+                job_id=job_id,
+                item_index=item_index,
+                seed=seed,
+            )
+            raw = still_path.read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            thumb_path = out_dir / f"thumb_{item_index:03d}.png"
+            w_out, h_out = 768, 960
+            if Image is not None:
+                im = Image.open(io.BytesIO(raw)).convert("RGB")
+                w_out, h_out = im.size
+                tw = 192
+                th = max(1, int(192 * h_out / max(w_out, 1)))
+                im.resize((tw, th)).save(thumb_path, "PNG")
+            else:
+                thumb_path.write_bytes(raw)
+            disclosure = {
+                "synthetic": True,
+                "ai_generated": True,
+                "age_appearance": "21+",
+                "disclosure": SYNTHETIC_DISCLOSURE_DEFAULT,
+                "pipeline": "qwen_tryon",
+                "job_id": job_id,
+                "seed": seed,
+                "source_asset_id": item.get("source_asset_id"),
+                **shot_meta_from_item(item),
+                **product_meta_from_item(item),
+            }
+            still_path.with_suffix(".disclosure.json").write_text(
+                json.dumps(disclosure, indent=2), encoding="utf-8"
+            )
+            await _publish(
+                redis,
+                {
+                    "job_id": job_id,
+                    "event": "item_done",
+                    "item_index": item_index,
+                    "path": str(still_path.relative_to(data_dir)).replace("\\", "/"),
+                    "thumb_path": str(thumb_path.relative_to(data_dir)).replace("\\", "/"),
+                    "width": w_out,
+                    "height": h_out,
+                    "seed": seed,
+                    "prompt_positive": item.get("extra_prompt"),
+                    "prompt_negative": None,
+                    "sha256": digest,
+                    "pipeline": "qwen_tryon",
+                    "meta": disclosure,
+                },
+            )
+        except Exception as e:
+            failures += 1
+            log.exception("try-on failed job=%s item=%s: %s", job_id, item_index, e)
+            await _publish(
+                redis,
+                {
+                    "job_id": job_id,
+                    "event": "item_failed",
+                    "item_index": item_index,
+                    "error_code": "tryon_failed",
+                    "message": str(e),
+                },
+            )
+            if not snapshot.get("resume_on_item_failure", True):
+                await _publish(
+                    redis,
+                    {
+                        "job_id": job_id,
+                        "event": "failed",
+                        "error_code": "tryon_failed",
+                        "message": str(e),
+                    },
+                )
+                return {"ok": False}
+
+    if failures and failures >= len(items):
+        await _publish(
+            redis,
+            {
+                "job_id": job_id,
+                "event": "failed",
+                "error_code": "tryon_all_items_failed",
+                "message": f"All {failures} try-on items failed",
+            },
+        )
+        return {"ok": False}
+
+    await _publish(
+        redis,
+        {
+            "job_id": job_id,
+            "event": "completed",
+            "message": f"garment try-on done ({len(items) - failures}/{len(items)})",
+            "failures": failures,
+        },
+    )
+    return {"ok": True, "failures": failures}
+
+
 async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
     from instantimpact_comfy.binder import (
         DETAIL_LORA_NODE_ID,
@@ -509,6 +699,15 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
         flux_params.get("detail_lora_name"),
         os.environ.get("INSTANTIMPACT_DETAIL_LORA_NAME"),
     )
+    if not detail_lora_name:
+        from instantimpact_common.flux_inventory import (
+            discover_detail_lora,
+            resolve_comfy_root,
+        )
+
+        detail_lora_name = discover_detail_lora(
+            resolve_comfy_root(os.environ.get("INSTANTIMPACT_COMFY_DIR"))
+        )
     detail_lora_strength = float(
         flux_params.get("detail_lora_strength")
         if flux_params.get("detail_lora_strength") is not None
@@ -863,8 +1062,8 @@ async def _run_comfy(redis: Any, snapshot: dict, *, request_path: Path) -> dict:
             still_name = f"still_{item_index:03d}_s{seed}.png"
             still_path = out_dir / still_name
             still_path.write_bytes(raw)
-            if _garment_tryon_requested(item):
-                await _apply_garment_tryon(
+            if garment_tryon_requested(item):
+                await apply_garment_tryon(
                     client=client,
                     workflows_dir=workflows_dir,
                     data_dir=data_dir,

@@ -33,6 +33,36 @@ CORE_NODES = (
 SPLIT_NODES = ("UNETLoader", "DualCLIPLoader", "VAELoader")
 CHECKPOINT_NODES = ("CheckpointLoaderSimple",)
 STILL_JOB_TYPES = frozenset({"seed_gallery", "still_batch", "validation_sheet"})
+GARMENT_JOB_TYPES = frozenset({"garment_tryon"})
+VIDEO_JOB_TYPES = frozenset({"video_i2v"})
+
+GARMENT_NODES = (
+    "UNETLoader",
+    "CLIPLoader",
+    "VAELoader",
+    "LoadImage",
+    "LoraLoaderModelOnly",
+    "TextEncodeQwenImageEdit",
+    "VAEEncode",
+    "KSampler",
+    "VAEDecode",
+    "SaveImage",
+)
+VIDEO_NODES = (
+    "UNETLoader",
+    "CLIPLoader",
+    "VAELoader",
+    "LoadImage",
+    "CLIPTextEncode",
+    "Wan22ImageToVideoLatent",
+    "KSampler",
+    "VAEDecode",
+    "CreateVideo",
+    "SaveVideo",
+)
+
+_DETAIL_LORA_NEEDLES = ("detail", "anatomy", "realism", "skin")
+_DETAIL_LORA_SKIP = ("lightning", "qwen", "wan", "pulid")
 
 
 @dataclass(frozen=True)
@@ -109,6 +139,45 @@ def discover_pulid_model(comfy_root: Path | None) -> str | None:
     if not hits:
         return None
     hits.sort(key=lambda p: (0 if "flux" in p.name.lower() else 1, p.name.lower()))
+    return hits[0].name
+
+
+def discover_detail_lora(comfy_root: Path | None) -> str | None:
+    """First anatomy/realism/detail LoRA under models/loras, preferring *flux*.
+
+    Skips Qwen Lightning and other non-Flux adapters. Hosts still choose the
+    file; this only auto-applies when INSTANTIMPACT_DETAIL_LORA_NAME is empty.
+    """
+    if not comfy_root:
+        return None
+    hits: list[Path] = []
+    for rel in KIND_DIRS.get("loras", ("models/loras",)):
+        folder = comfy_root / rel
+        if not folder.is_dir():
+            continue
+        try:
+            entries = list(folder.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if not entry.is_file():
+                continue
+            if entry.suffix.lower() not in {".safetensors", ".pt"}:
+                continue
+            name = entry.name.lower()
+            if any(skip in name for skip in _DETAIL_LORA_SKIP):
+                continue
+            if any(needle in name for needle in _DETAIL_LORA_NEEDLES):
+                hits.append(entry)
+    if not hits:
+        return None
+    hits.sort(
+        key=lambda p: (
+            0 if "flux" in p.name.lower() else 1,
+            0 if "detail" in p.name.lower() else 1,
+            p.name.lower(),
+        )
+    )
     return hits[0].name
 
 
@@ -211,6 +280,107 @@ def _file_entry(kind: str, name: str, path: Path | None) -> dict[str, Any]:
     }
 
 
+def flux_profile_name(runtime: FluxRuntime) -> str:
+    if _use_split(runtime.loader):
+        return "krea" if "krea" in (runtime.unet_name or "").lower() else "bf16"
+    return "fp8"
+
+
+def garment_weight_files(
+    getenv: Callable[[str], str | None] | None = None,
+) -> list[tuple[str, str]]:
+    get = getenv or os.environ.get
+    qwen_unet = get("INSTANTIMPACT_QWEN_EDIT_UNET") or "qwen_image_edit_fp8_e4m3fn.safetensors"
+    qwen_clip = get("INSTANTIMPACT_QWEN_EDIT_CLIP") or "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+    qwen_vae = get("INSTANTIMPACT_QWEN_EDIT_VAE") or "qwen_image_vae.safetensors"
+    qwen_lora = (
+        get("INSTANTIMPACT_QWEN_EDIT_LORA")
+        or "Qwen-Image-Edit-Lightning-4steps-V1.0-bf16.safetensors"
+    )
+    return [
+        ("diffusion_models", qwen_unet.strip()),
+        ("clip", qwen_clip.strip()),
+        ("vae", qwen_vae.strip()),
+        ("loras", qwen_lora.strip()),
+    ]
+
+
+def video_weight_files(
+    getenv: Callable[[str], str | None] | None = None,
+) -> list[tuple[str, str]]:
+    get = getenv or os.environ.get
+    return [
+        (
+            "diffusion_models",
+            (get("INSTANTIMPACT_WAN_UNET") or "wan2.2_ti2v_5B_fp16.safetensors").strip(),
+        ),
+        (
+            "clip",
+            (get("INSTANTIMPACT_WAN_CLIP") or "umt5_xxl_fp8_e4m3fn_scaled.safetensors").strip(),
+        ),
+        (
+            "vae",
+            (get("INSTANTIMPACT_WAN_VAE") or "wan2.2_vae.safetensors").strip(),
+        ),
+    ]
+
+
+def _inspect_required_files(
+    comfy_root: Path | None,
+    required: Iterable[tuple[str, str]],
+) -> tuple[list[dict[str, Any]], list[str], bool]:
+    files: list[dict[str, Any]] = []
+    missing_weights: list[str] = []
+    unverified = comfy_root is None
+    if not unverified:
+        for kind, name in required:
+            path = find_model(comfy_root, kind, name)
+            files.append(_file_entry(kind, name, path))
+            if path is not None:
+                continue
+            if kind_dirs_present(comfy_root, kind):
+                missing_weights.append(name)
+            else:
+                unverified = True
+    return files, missing_weights, unverified
+
+
+def _status_from_inventory(
+    *,
+    comfy_reachable: bool | None,
+    missing_nodes: list[str],
+    missing_weights: list[str],
+) -> str:
+    if comfy_reachable is False:
+        return "missing_weights" if missing_weights else "idle"
+    if missing_nodes:
+        return "missing_nodes"
+    if missing_weights:
+        return "missing_weights"
+    return "ok"
+
+
+def _empty_pipeline_report(
+    *,
+    status: str,
+    pipeline: str,
+    profile: str,
+    runtime: FluxRuntime,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "pipeline": pipeline,
+        "profile": profile,
+        "loader": runtime.loader,
+        "comfy_root": str(runtime.comfy_root) if runtime.comfy_root else None,
+        "missing_weights": [],
+        "missing_nodes": [],
+        "optional_missing": [],
+        "files": [],
+        "unverified": False,
+    }
+
+
 def inspect_flux_still(
     runtime: FluxRuntime,
     *,
@@ -218,17 +388,14 @@ def inspect_flux_still(
     comfy_reachable: bool | None = None,
 ) -> dict[str, Any]:
     """Return pipeline status: mock | ok | unreachable | missing_weights | missing_nodes."""
+    profile = flux_profile_name(runtime)
     if runtime.mock or not runtime.comfy_enabled:
-        return {
-            "status": "mock",
-            "loader": runtime.loader,
-            "comfy_root": str(runtime.comfy_root) if runtime.comfy_root else None,
-            "missing_weights": [],
-            "missing_nodes": [],
-            "optional_missing": [],
-            "files": [],
-            "unverified": False,
-        }
+        return _empty_pipeline_report(
+            status="mock",
+            pipeline="flux_still",
+            profile=profile,
+            runtime=runtime,
+        )
 
     required: list[tuple[str, str]] = []
     if _use_split(runtime.loader):
@@ -245,23 +412,16 @@ def inspect_flux_still(
         required.append(("checkpoints", runtime.ckpt_name))
         node_names = CORE_NODES + CHECKPOINT_NODES
 
-    files: list[dict[str, Any]] = []
-    missing_weights: list[str] = []
-    unverified = runtime.comfy_root is None
-    if not unverified:
-        for kind, name in required:
-            path = find_model(runtime.comfy_root, kind, name)
-            files.append(_file_entry(kind, name, path))
-            if path is not None:
-                continue
-            if kind_dirs_present(runtime.comfy_root, kind):
-                missing_weights.append(name)
-            else:
-                unverified = True
+    files, missing_weights, unverified = _inspect_required_files(runtime.comfy_root, required)
 
     optional: list[tuple[str, str]] = []
+    discovered_detail = None
     if runtime.detail_lora_name:
         optional.append(("loras", runtime.detail_lora_name))
+    else:
+        discovered_detail = discover_detail_lora(runtime.comfy_root)
+        if discovered_detail:
+            optional.append(("loras", discovered_detail))
     if runtime.upscale_model_name:
         optional.append(("upscale_models", runtime.upscale_model_name))
     if runtime.pulid_model_name:
@@ -282,20 +442,16 @@ def inspect_flux_still(
                 if n not in present:
                     missing_nodes.append(n)
 
-    if comfy_reachable is False:
-        # Worker starts Comfy per job. Down at idle is fine when weights exist.
-        status = "missing_weights" if missing_weights else "idle"
-    elif missing_nodes:
-        status = "missing_nodes"
-    elif missing_weights:
-        status = "missing_weights"
-    elif unverified:
-        status = "ok"
-    else:
-        status = "ok"
+    status = _status_from_inventory(
+        comfy_reachable=comfy_reachable,
+        missing_nodes=missing_nodes,
+        missing_weights=missing_weights,
+    )
 
     return {
         "status": status,
+        "pipeline": "flux_still",
+        "profile": profile,
         "loader": runtime.loader,
         "comfy_root": str(runtime.comfy_root) if runtime.comfy_root else None,
         "missing_weights": missing_weights,
@@ -304,29 +460,131 @@ def inspect_flux_still(
         "files": files,
         "unverified": unverified,
         "unet": runtime.unet_name if _use_split(runtime.loader) else runtime.ckpt_name,
+        "discovered_detail_lora": discovered_detail,
     }
+
+
+def inspect_garment_tryon(
+    runtime: FluxRuntime,
+    *,
+    object_info: dict[str, Any] | None = None,
+    comfy_reachable: bool | None = None,
+    getenv: Callable[[str], str | None] | None = None,
+) -> dict[str, Any]:
+    """Qwen Image Edit garment pipeline. Independent of Flux still weights."""
+    if runtime.mock or not runtime.comfy_enabled:
+        return _empty_pipeline_report(
+            status="mock",
+            pipeline="garment_tryon",
+            profile="garment",
+            runtime=runtime,
+        )
+    files, missing_weights, unverified = _inspect_required_files(
+        runtime.comfy_root, garment_weight_files(getenv)
+    )
+    missing_nodes: list[str] = []
+    if object_info is not None:
+        present = set(object_info)
+        missing_nodes = [n for n in GARMENT_NODES if n not in present]
+    status = _status_from_inventory(
+        comfy_reachable=comfy_reachable,
+        missing_nodes=missing_nodes,
+        missing_weights=missing_weights,
+    )
+    return {
+        "status": status,
+        "pipeline": "garment_tryon",
+        "profile": "garment",
+        "loader": runtime.loader,
+        "comfy_root": str(runtime.comfy_root) if runtime.comfy_root else None,
+        "missing_weights": missing_weights,
+        "missing_nodes": missing_nodes,
+        "optional_missing": [],
+        "files": files,
+        "unverified": unverified,
+    }
+
+
+def inspect_wan_video(
+    runtime: FluxRuntime,
+    *,
+    enabled: bool,
+    object_info: dict[str, Any] | None = None,
+    comfy_reachable: bool | None = None,
+    getenv: Callable[[str], str | None] | None = None,
+) -> dict[str, Any]:
+    """Wan 2.2 TI2V pipeline. Disabled when INSTANTIMPACT_ENABLE_VIDEO is false."""
+    if not enabled:
+        return _empty_pipeline_report(
+            status="disabled",
+            pipeline="wan_video",
+            profile="video",
+            runtime=runtime,
+        )
+    if runtime.mock or not runtime.comfy_enabled:
+        return _empty_pipeline_report(
+            status="mock",
+            pipeline="wan_video",
+            profile="video",
+            runtime=runtime,
+        )
+    files, missing_weights, unverified = _inspect_required_files(
+        runtime.comfy_root, video_weight_files(getenv)
+    )
+    missing_nodes: list[str] = []
+    if object_info is not None:
+        present = set(object_info)
+        missing_nodes = [n for n in VIDEO_NODES if n not in present]
+    status = _status_from_inventory(
+        comfy_reachable=comfy_reachable,
+        missing_nodes=missing_nodes,
+        missing_weights=missing_weights,
+    )
+    return {
+        "status": status,
+        "pipeline": "wan_video",
+        "profile": "video",
+        "loader": runtime.loader,
+        "comfy_root": str(runtime.comfy_root) if runtime.comfy_root else None,
+        "missing_weights": missing_weights,
+        "missing_nodes": missing_nodes,
+        "optional_missing": [],
+        "files": files,
+        "unverified": unverified,
+    }
+
+
+_PIPELINE_LABELS = {
+    "flux_still": "Flux still",
+    "garment_tryon": "Qwen garment try-on",
+    "wan_video": "Wan video",
+}
 
 
 def fail_closed_message(report: dict[str, Any]) -> str | None:
     status = report.get("status")
-    if status in {"mock", "ok", "idle"}:
+    if status in {"mock", "ok", "idle", "disabled"}:
         return None
+    pipeline = str(report.get("pipeline") or "flux_still")
+    label = _PIPELINE_LABELS.get(pipeline, pipeline.replace("_", " "))
     if status == "unreachable":
         return (
             "ComfyUI is not reachable. Start it on INSTANTIMPACT_COMFY_URL "
-            "before generating stills."
+            f"before generating {label.lower()}."
         )
     if status == "missing_nodes":
         nodes = ", ".join(report.get("missing_nodes") or [])
-        return f"ComfyUI is missing Flux still nodes: {nodes}"
+        return f"ComfyUI is missing {label} nodes: {nodes}"
     missing = ", ".join(report.get("missing_weights") or [])
-    loader = report.get("loader") or "checkpoint"
-    profile = "krea" if "krea" in str(report.get("unet") or "").lower() else (
-        "bf16" if loader in {"split", "unet", "diffusion_model"} else "fp8"
-    )
+    profile = report.get("profile")
+    if not profile:
+        loader = report.get("loader") or "checkpoint"
+        profile = "krea" if "krea" in str(report.get("unet") or "").lower() else (
+            "bf16" if loader in {"split", "unet", "diffusion_model"} else "fp8"
+        )
     root = report.get("comfy_root") or "$INSTANTIMPACT_COMFY_DIR"
     return (
-        f"Flux still pipeline missing weights: {missing}. "
+        f"{label} pipeline missing weights: {missing}. "
         f"Looked under {root}. "
         f"On the GPU host run: python scripts/bootstrap_models.py --profile {profile} "
         "--i-accept-licenses"
@@ -335,6 +593,16 @@ def fail_closed_message(report: dict[str, Any]) -> str | None:
 
 def stills_require_pipeline(job_type: str) -> bool:
     return job_type in STILL_JOB_TYPES
+
+
+def video_require_pipeline(job_type: str) -> bool:
+    return job_type in VIDEO_JOB_TYPES
+
+
+def garment_require_pipeline(job_type: str, *, units_need_tryon: bool = False) -> bool:
+    if job_type in GARMENT_JOB_TYPES:
+        return True
+    return units_need_tryon
 
 
 def dest_dir_for_kind(comfy_root: Path, kind: str) -> Path:

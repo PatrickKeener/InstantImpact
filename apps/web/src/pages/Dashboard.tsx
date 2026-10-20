@@ -36,8 +36,8 @@ export default function Dashboard() {
       <div>
         <h1 className="font-display text-3xl text-white">Studio dashboard</h1>
         <p className="mt-2 max-w-2xl text-slate-400">
-          Design synthetic adult personas, lock identity with Flux + LoRA, and batch stills — fully
-          local. MVP ships stills first; video & captions follow.
+          Design synthetic adult personas, lock identity with Flux + LoRA, batch stills, dress
+          garments, and export lookbook clips — fully local.
         </p>
       </div>
 
@@ -87,6 +87,30 @@ export default function Dashboard() {
           Retrain character LoRAs after the swap. Stills will not enqueue until the files are present.
         </div>
       )}
+      {health?.pipelines?.garment_tryon === "missing_weights" && (
+        <div className="card border-amber-500/30 bg-amber-950/30 p-4 text-sm text-amber-100">
+          Qwen garment try-on weights are missing
+          {health.pipelines.garment_tryon_detail?.missing_weights?.length
+            ? `: ${health.pipelines.garment_tryon_detail.missing_weights.join(", ")}`
+            : "."}{" "}
+          Dress jobs will not enqueue until the files are present.
+          <pre className="mt-2 overflow-x-auto rounded-lg bg-black/30 p-3 text-xs text-amber-50">
+            python scripts/bootstrap_models.py --profile garment --i-accept-licenses
+          </pre>
+        </div>
+      )}
+      {health?.pipelines?.wan_video === "missing_weights" && (
+        <div className="card border-amber-500/30 bg-amber-950/30 p-4 text-sm text-amber-100">
+          Wan video weights are missing
+          {health.pipelines.wan_video_detail?.missing_weights?.length
+            ? `: ${health.pipelines.wan_video_detail.missing_weights.join(", ")}`
+            : "."}{" "}
+          Clips will not enqueue until the files are present.
+          <pre className="mt-2 overflow-x-auto rounded-lg bg-black/30 p-3 text-xs text-amber-50">
+            python scripts/bootstrap_models.py --profile video --i-accept-licenses
+          </pre>
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="card p-5">
@@ -106,6 +130,11 @@ export default function Dashboard() {
             redis {health?.redis_ok ? "ok" : "down"} · comfy{" "}
             {health?.comfy_healthy === true ? "ok" : health?.comfy_healthy === false ? "down" : "n/a"}
             {health?.pipelines?.flux_still ? ` · flux ${health.pipelines.flux_still}` : ""}
+            {health?.pipelines?.garment_tryon
+              ? ` · garment ${health.pipelines.garment_tryon}`
+              : ""}
+            {health?.pipelines?.wan_video ? ` · video ${health.pipelines.wan_video}` : ""}
+            {health?.captions?.engine ? ` · captions ${health.captions.engine}` : ""}
             {health?.disk_free_gb != null ? ` · ${health.disk_free_gb} GB free` : ""}
           </div>
         </div>

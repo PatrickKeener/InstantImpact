@@ -211,6 +211,7 @@ class StillUnitRequest(BaseModel):
     video_frames: int | None = None
     video_fps: int | None = None
     video_steps: int | None = None
+    skip_garment_tryon: bool = False
 
 
 class JobRequestSnapshot(BaseModel):

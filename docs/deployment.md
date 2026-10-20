@@ -161,8 +161,9 @@ cd /home/pkeener/InstantImpact
 The garment profile installs Qwen Image Edit FP8 plus its vision encoder, VAE,
 and four-step LoRA (about 29 GB total). The video profile installs Wan 2.2
 TI2V-5B, UMT5 FP8, and the Wan VAE (about 19 GB total). Uploaded clothing is
-used as a visual reference after the FLUX character still is generated. Exact
-logos, typography, seams, and patterns still require human review.
+used as a visual reference after the FLUX character still is generated, or as
+the dress-on step before a lookbook video. Exact logos, typography, seams, and
+patterns still require human review.
 
 Enable video in the existing `.env` and restart:
 
@@ -175,9 +176,11 @@ INSTANTIMPACT_VIDEO_TIMEOUT=3600
 bash scripts/ii restart
 ```
 
-Video output is a silent 480×832 MP4, 81 frames at 16 fps (about five seconds).
-Generation uses the same exclusive GPU handoff as stills. Keep the silent
-master for later voice, captions, audio muxing, and lip sync.
+Video output is a silent 480×832 MP4. Default length is 121 frames at 16 fps
+(about eight seconds); Studio also offers 5s (81) and 10s (161). A garment
+product dresses the approved still with Qwen Image Edit, then Wan animates a
+lookbook turn. Generation uses the same exclusive GPU handoff as stills. Keep
+the silent master for later voice, captions, audio muxing, and lip sync.
 
 ---
 

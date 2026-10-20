@@ -68,7 +68,11 @@ export default function Products() {
         details: "",
       });
       setFile(null);
-      setInfo("Product added. Attach it from Character Studio → Batch stills.");
+      setInfo(
+        productKind === "garment"
+          ? "Garment added. In Character Studio, pick an approved still and this item to dress the model and make a lookbook video."
+          : "Product added. Attach it from Character Studio → Batch stills or Marketing videos."
+      );
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -96,9 +100,9 @@ export default function Products() {
       <div>
         <h1 className="font-display text-3xl tracking-tight">Products</h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-400">
-          Upload packaging or product shots to use as optional references when generating ad-style
-          stills. This is separate from character face refs — product images are for commercial
-          placement in the batch brief.
+          Upload packaging shots or clothing photos. Attach a general product in Character Studio
+          batch stills, or mark it as Clothing / garment so Studio can dress the model from the
+          product image and make a lookbook video showing the outfit.
         </p>
       </div>
 
@@ -202,7 +206,8 @@ export default function Products() {
         </form>
         {placements.length > 0 && (
           <p className="text-xs text-slate-500">
-            Studio placements: {placements.map((p) => p.label).join(", ")}.
+            Studio placements: {placements.map((p) => p.label).join(", ")}. Garments default to
+            wearing (try-on) for stills and lookbook videos.
           </p>
         )}
       </section>

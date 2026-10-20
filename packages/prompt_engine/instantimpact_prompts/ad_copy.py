@@ -1,7 +1,7 @@
 """Offline marketing ad-copy renderer from a locked character voice.
 
 No LLM required — deterministic templates + character few-shots.
-Ollama rewrite can wrap this later behind ENABLE_CAPTIONS.
+Ollama rewrite wraps this behind ENABLE_CAPTIONS (API ad_copy + export).
 """
 
 from __future__ import annotations

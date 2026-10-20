@@ -200,10 +200,13 @@ export type FluxStillDetail = {
   status?: string;
   loader?: string;
   unet?: string;
+  pipeline?: string;
+  profile?: string;
   missing_weights?: string[];
   missing_nodes?: string[];
   optional_missing?: string[];
   unverified?: boolean;
+  discovered_detail_lora?: string | null;
 };
 
 export type Health = {
@@ -216,9 +219,19 @@ export type Health = {
   disk_free_gb?: number | null;
   auth_required?: boolean;
   mock_generation?: boolean;
+  captions?: {
+    enabled?: boolean;
+    engine?: string;
+    ollama_url?: string;
+    ollama_model?: string;
+  };
   pipelines?: {
     flux_still?: string;
     flux_still_detail?: FluxStillDetail;
+    garment_tryon?: string;
+    garment_tryon_detail?: FluxStillDetail;
+    wan_video?: string;
+    wan_video_detail?: FluxStillDetail;
   };
 };
 
@@ -340,11 +353,35 @@ export const api = {
       fps?: number;
       steps?: number;
       seed?: number;
+      product_id?: string;
+      product_placement?: string;
+      garment_styling?: string;
+      accessories?: string;
     }
   ) =>
     request<Job>(`/api/characters/${characterId}/assets/${assetId}/video`, {
       method: "POST",
       body: JSON.stringify(body),
+    }),
+  dressAsset: (
+    characterId: string,
+    assetId: string,
+    body: {
+      product_id: string;
+      product_placement?: string;
+      garment_styling?: string;
+      accessories?: string;
+      count?: number;
+    }
+  ) =>
+    request<Job>(`/api/characters/${characterId}/assets/${assetId}/dress`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  validationSheet: (characterId: string, body?: { aspect_ratio?: string; seed?: number }) =>
+    request<Job>(`/api/characters/${characterId}/validation-sheet`, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
     }),
   loraStatus: (id: string) => request<LoraStatus>(`/api/characters/${id}/lora/status`),
   buildDataset: (id: string, body?: { decision?: string; min_images?: number }) =>

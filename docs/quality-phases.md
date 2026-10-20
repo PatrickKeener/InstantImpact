@@ -6,7 +6,7 @@ Work one phase at a time. Later phases assume the earlier ones are in place.
 |-------|-----|------|--------|
 | **1** | Code + you | Unblock quality knobs. CLIP-L carries identity. CFG is honored. Studio can set detail LoRA / denoise. | Done |
 | **2** | Code + you | Swap still checkpoint to bf16 Flux, then FLUX.1-Krea-dev photoreal UNET. Bootstrap + health fail-closed. Match train base. | Done (download on host) |
-| **3** | You | Install an anatomy/realism LoRA, set `detail_lora_name`, generate a comparison batch. Retrain character LoRAs after the checkpoint swap. | Host |
+| **3** | You | Install an anatomy/realism LoRA, set `detail_lora_name`, generate a comparison batch. Retrain character LoRAs after the checkpoint swap. | Host (app auto-discovers `*detail*`/`*anatomy*`/`*realism*` LoRAs) |
 | **4** | Code | Pixel upscaler instead of latent `nearest-exact`. | Done |
 | **5** | Code | PuLID-Flux from the generate-only ref pack. | Done (optional) |
 | **6** | Code | Training captions + LoRA dim + face-score review. | Done |
@@ -30,7 +30,7 @@ App support:
 
 - `python scripts/bootstrap_models.py --profile krea --i-accept-licenses` downloads the photoreal UNET + shared CLIP/T5/VAE into `INSTANTIMPACT_COMFY_DIR`.
 - Profiles: `fp8` (rollback), `bf16` (stock Flux precision), `krea` (recommended photoreal on L40S), `krea-fp8` (VRAM fallback).
-- `GET /api/system/health` → `pipelines.flux_still` (`ok` / `mock` / `missing_weights` / `missing_nodes` / `unreachable`).
+- `GET /api/system/health` → `pipelines.flux_still`, `garment_tryon`, `wan_video` (`ok` / `mock` / `idle` / `disabled` / `missing_weights` / `missing_nodes`).
 - Still enqueue **fails closed** (HTTP 503) when required files are missing under `INSTANTIMPACT_COMFY_DIR`.
 - Dashboard shows a missing-weights banner with the bootstrap command.
 
@@ -56,7 +56,7 @@ Budget about **34 GB** of VRAM (23.8 UNET + 9.8 T5). On a 48 GB L40S stop other 
 ## Phase 3 — detail LoRA + retrain
 
 1. Place an anatomy/realism Flux LoRA in `ComfyUI/models/loras/`.
-2. Either set `INSTANTIMPACT_DETAIL_LORA_NAME=thatfile.safetensors` or paste the filename in Studio → Still quality → save.
+2. Either set `INSTANTIMPACT_DETAIL_LORA_NAME=thatfile.safetensors` or paste the filename in Studio → Still quality → save. An empty field auto-applies the first matching `*detail*` / `*anatomy*` / `*realism*` file (Qwen Lightning is skipped). Health reports `discovered_detail_lora`.
 3. Start at strength **0.6**.
 4. After a checkpoint swap, **retrain every character LoRA** (Studio → Train LoRA & register). Old LoRAs are deltas against the previous base.
 

@@ -183,6 +183,7 @@ async def export_set(
 
     # Verify hashes
     manifest_path = layout.root / (aset.manifest_path or "")
+    manifest: dict[str, Any] = {}
     if manifest_path.is_file():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         for entry in manifest.get("files") or []:
@@ -192,6 +193,10 @@ async def export_set(
             digest = sha256_file(f)
             if entry.get("sha256") and digest != entry["sha256"]:
                 raise JobServiceError(f"Hash mismatch for {entry['file']} — set may be corrupted")
+
+    await _write_export_captions(db, aset, items, files_dir, manifest)
+    if manifest_path.is_file() and manifest:
+        write_json(manifest_path, manifest)
 
     exports = layout.exports_dir
     exports.mkdir(parents=True, exist_ok=True)
@@ -210,3 +215,83 @@ async def export_set(
     out["export_path"] = aset.export_path
     out["download"] = f"/api/system/media/{aset.export_path}"
     return out
+
+
+async def _write_export_captions(
+    db: AsyncSession,
+    aset: ApprovedSet,
+    items: list[ApprovedSetItem],
+    files_dir: Any,
+    manifest: dict[str, Any],
+) -> None:
+    """Attach captions.md and per-file .txt sidecars. Templates if Ollama is down."""
+    from app.schemas.characters import AdCopyRequest
+    from app.services import ad_copy as ad_copy_svc
+
+    by_id = {entry.get("asset_id"): entry for entry in (manifest.get("files") or [])}
+    lines = [
+        "# Captions",
+        "",
+        "Synthetic adult (21+) persona. AI-generated.",
+        "",
+    ]
+    engine_used = "template_v1"
+    for item in sorted(items, key=lambda x: x.position):
+        q = await db.execute(select(Asset).where(Asset.id == item.asset_id))
+        asset = q.scalar_one_or_none()
+        if not asset:
+            continue
+        meta = dict(asset.meta_json or {})
+        caption = str(meta.get("marketing_caption") or "").strip()
+        short = str(meta.get("marketing_caption_short") or "").strip()
+        cta = str(meta.get("marketing_cta") or "").strip()
+        if not caption:
+            try:
+                copy = await ad_copy_svc.generate_ad_copy(
+                    db,
+                    aset.character_id,
+                    AdCopyRequest(asset_id=asset.id, count=1, seed=asset.seed),
+                )
+                caption = str(copy.get("primary") or "").strip()
+                short = str(copy.get("short") or "").strip()
+                cta = str(copy.get("cta") or "").strip()
+                if copy.get("engine") == "ollama":
+                    engine_used = "ollama"
+                if caption:
+                    meta["marketing_caption"] = caption
+                    if short:
+                        meta["marketing_caption_short"] = short
+                    if cta:
+                        meta["marketing_cta"] = cta
+                    if copy.get("product_id"):
+                        meta["product_id"] = copy["product_id"]
+                    asset.meta_json = meta
+            except Exception:
+                caption = ""
+        entry = by_id.get(asset.id) or {}
+        dest_name = entry.get("file")
+        if not dest_name:
+            continue
+        dest = files_dir / dest_name
+        if not dest.is_file():
+            continue
+        block = [f"## {dest_name}", ""]
+        if caption:
+            sidecar = dest.with_name(dest.name + ".txt")
+            sidecar.write_text(caption + ("\n" + short if short else "") + "\n", encoding="utf-8")
+            block.append(caption)
+            if short:
+                block.append("")
+                block.append(f"short: {short}")
+            if cta:
+                block.append(f"cta: {cta}")
+        else:
+            block.append("_No caption generated._")
+        block.append("")
+        lines.extend(block)
+
+    captions_path = files_dir.parent / "captions.md"
+    captions_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    manifest["captions"] = "captions.md"
+    manifest["caption_engine"] = engine_used
+

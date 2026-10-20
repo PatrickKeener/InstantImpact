@@ -1,3 +1,5 @@
+import asyncio
+
 from instantimpact_prompts.ad_copy import render_ad_copy
 
 
@@ -42,3 +44,16 @@ def test_render_ad_copy_without_product():
     )
     assert out["primary"]
     assert out["product_name"] is None
+
+
+def test_ollama_rewrite_returns_none_when_down():
+    from app.services.ollama_captions import rewrite_ad_copy
+
+    result = asyncio.run(
+        rewrite_ad_copy(
+            {"primary": "hello", "short": "hi", "cta": "go", "character_name": "Aria"},
+            url="http://127.0.0.1:1",
+            model="llama3.1",
+        )
+    )
+    assert result is None

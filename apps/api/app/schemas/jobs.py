@@ -4,6 +4,14 @@ from datetime import datetime
 from typing import Any
 
 from instantimpact_common.schemas import BriefItem
+from instantimpact_common.video import (
+    DEFAULT_VIDEO_MOTION,
+    WAN_FRAMES_DEFAULT,
+    WAN_FRAMES_MAX,
+    WAN_FRAMES_MIN,
+    WAN_FPS_DEFAULT,
+    WAN_STEPS_DEFAULT,
+)
 from pydantic import BaseModel, Field
 
 
@@ -177,20 +185,35 @@ class RegenerateAssetRequest(BaseModel):
     )
 
 
+class GarmentDressRequest(BaseModel):
+    product_id: str
+    product_placement: str | None = "wearing"
+    garment_styling: str | None = None
+    accessories: str | None = None
+    count: int = Field(default=1, ge=1, le=4)
+    seed: int | None = None
+
+
+class ValidationSheetRequest(BaseModel):
+    aspect_ratio: str = "4:5"
+    seed: int | None = None
+
+
 class VideoGenerateRequest(BaseModel):
     motion_prompt: str = Field(
-        default=(
-            "subtle natural movement, gentle breathing, slight head turn, "
-            "slow camera push-in, preserve face and clothing"
-        ),
+        default=DEFAULT_VIDEO_MOTION,
         min_length=3,
         max_length=1200,
     )
     negative_prompt: str | None = Field(default=None, max_length=1200)
-    frames: int = Field(default=81, ge=17, le=121)
-    fps: int = Field(default=16, ge=8, le=30)
-    steps: int = Field(default=20, ge=4, le=40)
+    frames: int = Field(default=WAN_FRAMES_DEFAULT, ge=WAN_FRAMES_MIN, le=WAN_FRAMES_MAX)
+    fps: int = Field(default=WAN_FPS_DEFAULT, ge=8, le=30)
+    steps: int = Field(default=WAN_STEPS_DEFAULT, ge=4, le=40)
     seed: int | None = None
+    product_id: str | None = None
+    product_placement: str | None = None
+    garment_styling: str | None = None
+    accessories: str | None = None
 
 
 class ApprovedSetCreateRequest(BaseModel):

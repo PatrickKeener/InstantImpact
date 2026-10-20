@@ -17,12 +17,12 @@ Full architecture, consistency strategy, and PR plan:
 | In | Out (later) |
 |----|-------------|
 | Character Creator | Talking/lip-synced video |
-| Flux still consistency path | Ollama captions |
-| Seed gallery + batch stills | SDXL dual pipeline |
-| Review / approve | Fanvue API |
+| Flux still consistency path | Lip-sync / TTS |
+| Seed gallery + batch stills + validation sheet | SDXL dual pipeline |
+| Review / approve / export captions | Fanvue API |
 | Mock gen + ComfyUI hooks | Kohya fallback |
-| Garment reference try-on | |
-| Silent vertical I2V marketing clips | |
+| Garment try-on (dress, then lookbook) | |
+| Silent vertical I2V lookbook clips | |
 
 ## Where to run it
 

@@ -2,11 +2,16 @@ from pathlib import Path
 
 from instantimpact_common.flux_inventory import (
     FluxRuntime,
+    discover_detail_lora,
     discover_pulid_model,
     fail_closed_message,
     find_model,
+    garment_require_pipeline,
     inspect_flux_still,
+    inspect_garment_tryon,
+    inspect_wan_video,
     stills_require_pipeline,
+    video_require_pipeline,
 )
 from instantimpact_common.model_pins import PROFILE_ENV, pins_for_profile
 
@@ -234,4 +239,88 @@ def test_bootstrap_dry_run_lists_krea_destinations(tmp_path: Path, capsys):
 def test_stills_require_pipeline_skips_train():
     assert stills_require_pipeline("seed_gallery")
     assert stills_require_pipeline("still_batch")
+    assert stills_require_pipeline("validation_sheet")
     assert not stills_require_pipeline("lora_train")
+    assert not stills_require_pipeline("garment_tryon")
+    assert not stills_require_pipeline("video_i2v")
+    assert video_require_pipeline("video_i2v")
+    assert garment_require_pipeline("garment_tryon")
+    assert garment_require_pipeline("video_i2v", units_need_tryon=True)
+    assert not garment_require_pipeline("video_i2v", units_need_tryon=False)
+
+
+def test_discover_detail_lora_skips_qwen_lightning(tmp_path: Path):
+    _touch(tmp_path, "models/loras/Qwen-Image-Edit-Lightning-4steps-V1.0-bf16.safetensors")
+    _touch(tmp_path, "models/loras/skin_realism_v1.safetensors")
+    _touch(tmp_path, "models/loras/flux_anatomy_detail.safetensors")
+    assert discover_detail_lora(tmp_path) == "flux_anatomy_detail.safetensors"
+
+
+def test_inspect_garment_missing_weights(tmp_path: Path):
+    (tmp_path / "models" / "diffusion_models").mkdir(parents=True)
+    (tmp_path / "models" / "clip").mkdir(parents=True)
+    (tmp_path / "models" / "vae").mkdir(parents=True)
+    (tmp_path / "models" / "loras").mkdir(parents=True)
+    report = inspect_garment_tryon(
+        FluxRuntime(
+            mock=False,
+            comfy_enabled=True,
+            loader="split",
+            comfy_root=tmp_path,
+            ckpt_name="x",
+            unet_name="x",
+            clip_name1="a",
+            clip_name2="b",
+            vae_name="c",
+        ),
+        comfy_reachable=True,
+    )
+    assert report["status"] == "missing_weights"
+    assert report["pipeline"] == "garment_tryon"
+    msg = fail_closed_message(report)
+    assert msg is not None
+    assert "--profile garment" in msg
+    assert "Qwen garment" in msg
+
+
+def test_inspect_wan_disabled_does_not_fail_closed():
+    report = inspect_wan_video(
+        FluxRuntime(
+            mock=False,
+            comfy_enabled=True,
+            loader="split",
+            comfy_root=None,
+            ckpt_name="x",
+            unet_name="x",
+            clip_name1="a",
+            clip_name2="b",
+            vae_name="c",
+        ),
+        enabled=False,
+        comfy_reachable=True,
+    )
+    assert report["status"] == "disabled"
+    assert fail_closed_message(report) is None
+
+
+def test_inspect_garment_ok_when_files_present(tmp_path: Path):
+    _touch(tmp_path, "models/diffusion_models/qwen_image_edit_fp8_e4m3fn.safetensors")
+    _touch(tmp_path, "models/clip/qwen_2.5_vl_7b_fp8_scaled.safetensors")
+    _touch(tmp_path, "models/vae/qwen_image_vae.safetensors")
+    _touch(tmp_path, "models/loras/Qwen-Image-Edit-Lightning-4steps-V1.0-bf16.safetensors")
+    report = inspect_garment_tryon(
+        FluxRuntime(
+            mock=False,
+            comfy_enabled=True,
+            loader="split",
+            comfy_root=tmp_path,
+            ckpt_name="x",
+            unet_name="x",
+            clip_name1="a",
+            clip_name2="b",
+            vae_name="c",
+        ),
+        comfy_reachable=True,
+    )
+    assert report["status"] == "ok"
+    assert fail_closed_message(report) is None

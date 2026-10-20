@@ -34,6 +34,17 @@ def test_still_batch_blocks_draft():
     assert not r.ok
 
 
+def test_garment_tryon_allowed_in_draft():
+    r = validate_for_enqueue(
+        job_type="garment_tryon",
+        character_status="draft",
+        synthetic_confirmed=True,
+        age_appearance_min=21,
+        not_real_person_attested=True,
+    )
+    assert r.ok
+
+
 def test_kid_does_not_match_kidney():
     r = scan_text("kidney beans in a lifestyle kitchen photo")
     assert r.ok

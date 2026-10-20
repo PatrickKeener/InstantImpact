@@ -28,6 +28,7 @@ class JobType(StrEnum):
     REF_EMBED = "ref_embed"
     VALIDATION_SHEET = "validation_sheet"
     VIDEO_I2V = "video_i2v"
+    GARMENT_TRYON = "garment_tryon"
 
 
 class JobStatus(StrEnum):

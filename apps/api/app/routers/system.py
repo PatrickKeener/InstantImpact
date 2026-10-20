@@ -5,7 +5,11 @@ from fastapi.responses import FileResponse
 
 from app.config import get_settings
 from app.services.storage import get_layout, resolve_under_root
-from instantimpact_common.flux_inventory import inspect_flux_still
+from instantimpact_common.flux_inventory import (
+    inspect_flux_still,
+    inspect_garment_tryon,
+    inspect_wan_video,
+)
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -37,13 +41,17 @@ async def _comfy_object_info(url: str) -> dict | None:
         return None
 
 
-def _flux_report(*, comfy_healthy: bool | None, object_info: dict | None) -> dict:
+def _pipeline_reports(*, comfy_healthy: bool | None, object_info: dict | None) -> dict[str, dict]:
     settings = get_settings()
-    return inspect_flux_still(
-        settings.flux_runtime(),
-        object_info=object_info,
-        comfy_reachable=comfy_healthy,
-    )
+    runtime = settings.flux_runtime()
+    kwargs = {"object_info": object_info, "comfy_reachable": comfy_healthy}
+    return {
+        "flux_still": inspect_flux_still(runtime, **kwargs),
+        "garment_tryon": inspect_garment_tryon(runtime, **kwargs),
+        "wan_video": inspect_wan_video(
+            runtime, enabled=settings.enable_video, **kwargs
+        ),
+    }
 
 
 async def _gpu_holder(url: str) -> str | None:
@@ -90,12 +98,16 @@ async def health():
     object_info = None
     if comfy_healthy is True and not settings.mock_generation:
         object_info = await _comfy_object_info(settings.comfy_url)
-    flux_still = _flux_report(comfy_healthy=comfy_healthy, object_info=object_info)
+    reports = _pipeline_reports(comfy_healthy=comfy_healthy, object_info=object_info)
+    flux_still = reports["flux_still"]
+    garment_tryon = reports["garment_tryon"]
+    wan_video = reports["wan_video"]
 
     status = "ok"
     if not redis_ok and not settings.mock_generation:
         status = "degraded"
-    if flux_still.get("status") in {"missing_weights", "missing_nodes", "unreachable"}:
+    blocking = {"missing_weights", "missing_nodes", "unreachable"}
+    if any(report.get("status") in blocking for report in reports.values()):
         status = "degraded"
 
     return {
@@ -114,6 +126,12 @@ async def health():
             "marketing_voice": True,
             "mock_generation": settings.mock_generation,
         },
+        "captions": {
+            "enabled": settings.enable_captions,
+            "engine": "ollama" if settings.enable_captions else "template_v1",
+            "ollama_url": settings.ollama_url,
+            "ollama_model": settings.ollama_model,
+        },
         "strict_offline": settings.strict_offline,
         "auth_required": settings.auth_is_required(),
         "data_dir": str(data),
@@ -124,7 +142,14 @@ async def health():
         "gpu_locked": bool(gpu_holder),
         "gpu_holder": gpu_holder,
         "toolkit_ready": _toolkit_ready(),
-        "pipelines": {"flux_still": flux_still.get("status"), "flux_still_detail": flux_still},
+        "pipelines": {
+            "flux_still": flux_still.get("status"),
+            "flux_still_detail": flux_still,
+            "garment_tryon": garment_tryon.get("status"),
+            "garment_tryon_detail": garment_tryon,
+            "wan_video": wan_video.get("status"),
+            "wan_video_detail": wan_video,
+        },
     }
 
 
@@ -138,14 +163,15 @@ async def models():
         comfy_healthy = await _comfy_health(settings.comfy_url)
         if comfy_healthy:
             object_info = await _comfy_object_info(settings.comfy_url)
-    report = _flux_report(comfy_healthy=comfy_healthy, object_info=object_info)
+    reports = _pipeline_reports(comfy_healthy=comfy_healthy, object_info=object_info)
     from instantimpact_common.model_pins import PROFILE_ENV, PROFILES
 
     return {
         "profiles": PROFILES,
         "profile_env": PROFILE_ENV,
         "bootstrap": "python scripts/bootstrap_models.py --profile krea --i-accept-licenses",
-        "pipeline": report,
+        "pipeline": reports["flux_still"],
+        "pipelines": reports,
     }
 
 

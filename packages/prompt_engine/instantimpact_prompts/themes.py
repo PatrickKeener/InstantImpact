@@ -35,3 +35,13 @@ THEME_HINTS: dict[str, str] = {
         "shot on an 85mm lens at f/2.8, realistic makeup and true-to-life skin"
     ),
 }
+
+# Fixed six-shot LoRA check after train. (theme, pose_hint)
+VALIDATION_SHEET_SHOTS: tuple[tuple[str, str], ...] = (
+    ("portrait", "head-and-shoulders, looking at camera"),
+    ("portrait", "three-quarter view, looking slightly off camera"),
+    ("glamour", "full body, editorial stance"),
+    ("casual_bedroom", "hands visible, relaxed seated pose"),
+    ("outdoor_day", "walking toward camera"),
+    ("lingerie_set", "editorial standing pose, full body"),
+)

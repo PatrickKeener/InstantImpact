@@ -93,7 +93,13 @@ def validate_for_enqueue(
     )
     reasons = list(base.reasons)
 
-    if job_type in ("still_batch", "seed_gallery", "validation_sheet", "ref_embed"):
+    if job_type in (
+        "still_batch",
+        "seed_gallery",
+        "validation_sheet",
+        "ref_embed",
+        "garment_tryon",
+    ):
         if character_status not in ("draft", "bootstrap", "training", "ready"):
             reasons.append(f"status '{character_status}' cannot run {job_type}")
         if job_type == "still_batch" and character_status == "draft":

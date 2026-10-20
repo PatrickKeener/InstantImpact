@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, AdCopyResult, ApprovedSet, Asset, Character, Job, LoraStatus, Product } from "../api";
+import {
+  api,
+  AdCopyResult,
+  ApprovedSet,
+  Asset,
+  Character,
+  Health,
+  Job,
+  LoraStatus,
+  Product,
+} from "../api";
 
 const THEMES = [
   "portrait",
@@ -38,10 +48,29 @@ const VIDEO_MOTION_PRESETS = [
   },
   {
     id: "fabric_motion",
-    label: "Fabric movement",
-    prompt: "subtle body turn and gentle fabric movement showing the garment fit and material, stable camera",
+    label: "Lookbook / fabric",
+    prompt:
+      "she slowly turns to show the outfit from multiple angles, natural weight shift, gentle fabric movement showing fit and material, hands lightly smooth the garment, slow commercial camera orbit, preserve the exact face, hair, and clothing",
   },
 ] as const;
+
+const VIDEO_DURATION_OPTIONS = [
+  { seconds: 5, frames: 81, label: "5 seconds" },
+  { seconds: 8, frames: 121, label: "8 seconds" },
+  { seconds: 10, frames: 161, label: "10 seconds" },
+] as const;
+
+function isGarmentProduct(product: Product | undefined): boolean {
+  return product?.meta?.product_kind === "garment";
+}
+
+function stillIsDressed(asset: Asset | undefined, productId: string): boolean {
+  if (!asset || !productId) return false;
+  return (
+    asset.meta?.product_conditioning === "qwen_image_edit_tryon" &&
+    asset.meta?.product_id === productId
+  );
+}
 
 type BriefLine = {
   theme: string;
@@ -163,16 +192,23 @@ export default function CharacterStudio() {
   const [fluxKnobs, setFluxKnobs] = useState<FluxKnobs>(DEFAULT_FLUX_KNOBS);
   const [fluxDirty, setFluxDirty] = useState(false);
   const [videoMotion, setVideoMotion] = useState<string>(VIDEO_MOTION_PRESETS[0].prompt);
+  const [videoDurationSec, setVideoDurationSec] = useState<number>(8);
+  const [videoProductId, setVideoProductId] = useState("");
+  const [videoGarmentStyling, setVideoGarmentStyling] = useState("");
+  const [videoAccessories, setVideoAccessories] = useState("");
+  const [videoSourceAssetId, setVideoSourceAssetId] = useState("");
+  const [health, setHealth] = useState<Health | null>(null);
 
   const refresh = useCallback(async () => {
     if (!id) return;
-    const [c, j, a, l, s, p] = await Promise.all([
+    const [c, j, a, l, s, p, h] = await Promise.all([
       api.getCharacter(id),
       api.listJobs(id),
       api.listAssets(id),
       api.loraStatus(id),
       api.listApprovedSets(id),
       api.listProducts(),
+      api.health().catch(() => null),
     ]);
     setCharacter(c);
     setJobs(j);
@@ -180,6 +216,7 @@ export default function CharacterStudio() {
     setLora(l);
     setSets(s);
     setProducts(p);
+    if (h) setHealth(h);
   }, [id]);
 
   useEffect(() => {
@@ -207,7 +244,22 @@ export default function CharacterStudio() {
     () => assets.filter((a) => a.kind !== "video"),
     [assets]
   );
+  const approvedStills = useMemo(
+    () => stillAssets.filter((a) => a.decision === "approved"),
+    [stillAssets]
+  );
+  useEffect(() => {
+    if (!videoSourceAssetId && approvedStills[0]) {
+      setVideoSourceAssetId(approvedStills[0].id);
+    }
+  }, [approvedStills, videoSourceAssetId]);
   const videos = useMemo(() => assets.filter((a) => a.kind === "video"), [assets]);
+  const videoProduct = products.find((p) => p.id === videoProductId);
+  const videoProductIsGarment = isGarmentProduct(videoProduct);
+  const lookbookSource = approvedStills.find((still) => still.id === videoSourceAssetId);
+  const lookbookSourceDressed = stillIsDressed(lookbookSource, videoProductId);
+  const discoveredDetailLora =
+    health?.pipelines?.flux_still_detail?.discovered_detail_lora || "";
   const visible = useMemo(() => {
     const list =
       filter === "all" ? stillAssets : stillAssets.filter((a) => a.decision === filter);
@@ -510,19 +562,90 @@ export default function CharacterStudio() {
     }
   }
 
-  async function createVideo(assetId: string, motion: string = videoMotion) {
+  async function createVideo(
+    assetId: string,
+    options?: { motion?: string; productId?: string }
+  ) {
     if (!id) return;
+    const motion = (options?.motion ?? videoMotion).trim();
+    const productId = options?.productId ?? videoProductId;
+    const product = products.find((p) => p.id === productId);
+    const frames =
+      VIDEO_DURATION_OPTIONS.find((option) => option.seconds === videoDurationSec)?.frames ??
+      121;
     setBusy(true);
     setError(null);
     setInfo(null);
     try {
       const job = await api.createVideo(id, assetId, {
-        motion_prompt: motion.trim(),
-        frames: 81,
+        motion_prompt: motion,
+        frames,
         fps: 16,
         steps: 20,
+        product_id: productId || undefined,
+        product_placement: product
+          ? isGarmentProduct(product)
+            ? "wearing"
+            : "holding"
+          : undefined,
+        garment_styling:
+          product && isGarmentProduct(product) ? videoGarmentStyling || undefined : undefined,
+        accessories:
+          product && isGarmentProduct(product) ? videoAccessories || undefined : undefined,
       });
-      setInfo(`Vertical video queued (${job.id.slice(0, 8)}…).`);
+      const secondsLabel = `${videoDurationSec}s`;
+      setInfo(
+        product
+          ? `Lookbook video queued (${secondsLabel}, ${job.id.slice(0, 8)}…).`
+          : `Vertical video queued (${secondsLabel}, ${job.id.slice(0, 8)}…).`
+      );
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function dressAsset(assetId: string, options?: { productId?: string }) {
+    if (!id) return;
+    const productId = options?.productId ?? videoProductId;
+    const product = products.find((p) => p.id === productId);
+    if (!product || !isGarmentProduct(product)) {
+      setError("Pick a clothing product first, then dress the model.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const job = await api.dressAsset(id, assetId, {
+        product_id: productId,
+        product_placement: "wearing",
+        garment_styling: videoGarmentStyling || undefined,
+        accessories: videoAccessories || undefined,
+      });
+      setInfo(
+        `Dress job queued (${job.id.slice(0, 8)}…). Approve the dressed still, then create the lookbook clip.`
+      );
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runValidationSheet() {
+    if (!id) return;
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const job = await api.validationSheet(id);
+      setInfo(
+        `Validation sheet queued (${job.id.slice(0, 8)}…). Six poses to check the locked LoRA.`
+      );
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -664,6 +787,16 @@ export default function CharacterStudio() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  function selectVideoProduct(productId: string) {
+    setVideoProductId(productId);
+    const selected = products.find((p) => p.id === productId);
+    if (isGarmentProduct(selected)) {
+      setVideoMotion(VIDEO_MOTION_PRESETS[3].prompt);
+    } else if (productId) {
+      setVideoMotion(VIDEO_MOTION_PRESETS[2].prompt);
     }
   }
 
@@ -838,6 +971,9 @@ export default function CharacterStudio() {
                 Hunt new faces (6)
               </button>
             )}
+            <button className="btn-ghost" disabled={busy} onClick={() => void runValidationSheet()}>
+              Validation sheet (6)
+            </button>
           </div>
           <div className="space-y-2 rounded-xl border border-white/10 p-3">
             <p className="text-xs text-slate-400">
@@ -1189,6 +1325,12 @@ export default function CharacterStudio() {
               value={fluxKnobs.detail_lora_name}
               onChange={(e) => patchFlux({ detail_lora_name: e.target.value })}
             />
+            {!fluxKnobs.detail_lora_name && discoveredDetailLora && (
+              <p className="mt-1 text-[11px] text-slate-500">
+                Auto-applies <code className="text-slate-300">{discoveredDetailLora}</code> when
+                this field is empty. Save the filename to pin it.
+              </p>
+            )}
           </div>
           <div>
             <label className="label">Detail strength</label>
@@ -1258,14 +1400,155 @@ export default function CharacterStudio() {
         <div>
           <h2 className="font-display text-xl">Marketing videos</h2>
           <p className="mt-1 text-xs text-slate-500">
-            Silent 9:16 Wan 2.2 clips. Download the clean MP4 now; voice and lip sync can be
-            added as a later post-processing stage.
+            Silent 9:16 Wan 2.2 clips, default 8 seconds. Dress the model from a clothing product
+            first, approve the dressed still, then animate a lookbook turn.
           </p>
         </div>
+        <div className="space-y-3 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="text-xs font-medium text-accent-soft">Lookbook clip</div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="block space-y-1 text-xs text-slate-400">
+              Approved still
+              <select
+                className="input"
+                value={videoSourceAssetId}
+                onChange={(e) => setVideoSourceAssetId(e.target.value)}
+              >
+                <option value="">Select a still…</option>
+                {approvedStills.map((still) => {
+                  const productName =
+                    typeof still.meta?.product_name === "string" ? still.meta.product_name : "";
+                  return (
+                    <option key={still.id} value={still.id}>
+                      {productName ? `${productName} · ` : ""}
+                      seed {still.seed ?? "—"}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <label className="block space-y-1 text-xs text-slate-400">
+              Product / garment
+              <select
+                className="input"
+                value={videoProductId}
+                onChange={(e) => selectVideoProduct(e.target.value)}
+              >
+                <option value="">None — animate the still as-is</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {isGarmentProduct(p) ? " · garment" : ""}
+                    {p.brand ? ` · ${p.brand}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block space-y-1 text-xs text-slate-400">
+              Length
+              <select
+                className="input"
+                value={videoDurationSec}
+                onChange={(e) => setVideoDurationSec(Number(e.target.value))}
+              >
+                {VIDEO_DURATION_OPTIONS.map((option) => (
+                  <option key={option.seconds} value={option.seconds}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block space-y-1 text-xs text-slate-400">
+              Motion
+              <select
+                className="input"
+                value={
+                  VIDEO_MOTION_PRESETS.find((preset) => preset.prompt === videoMotion)?.id ||
+                  "custom"
+                }
+                onChange={(e) => {
+                  const preset = VIDEO_MOTION_PRESETS.find(
+                    (candidate) => candidate.id === e.target.value
+                  );
+                  if (preset) setVideoMotion(preset.prompt);
+                }}
+              >
+                {VIDEO_MOTION_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </option>
+                ))}
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+          </div>
+          {videoProduct && (
+            <div className="flex items-center gap-3">
+              {(videoProduct.thumb_path || videoProduct.primary_path) && (
+                <img
+                  src={api.mediaUrl(videoProduct.thumb_path || videoProduct.primary_path)}
+                  alt=""
+                  className="h-14 w-14 rounded-lg bg-black/30 object-contain"
+                />
+              )}
+              <p className="text-xs text-slate-400">
+                {videoProductIsGarment
+                  ? lookbookSourceDressed
+                    ? "This still is already dressed in that garment. Create the lookbook clip from it."
+                    : "Dress the model first, approve the dressed still, then create the lookbook clip. Creating a clip on an undressed still still dresses then animates in one GPU job."
+                  : "The clip will keep this product in frame from the still."}
+              </p>
+            </div>
+          )}
+          {videoProductIsGarment && (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <input
+                className="input"
+                value={videoGarmentStyling}
+                placeholder="fit/styling (tucked in, open jacket, high waist)"
+                onChange={(e) => setVideoGarmentStyling(e.target.value)}
+              />
+              <input
+                className="input"
+                value={videoAccessories}
+                placeholder="accessories (shoes, jewelry, bag)"
+                onChange={(e) => setVideoAccessories(e.target.value)}
+              />
+            </div>
+          )}
+          <textarea
+            className="input min-h-16"
+            value={videoMotion}
+            onChange={(e) => setVideoMotion(e.target.value)}
+          />
+          <div className="flex flex-wrap gap-2">
+            {videoProductIsGarment && (
+              <button
+                type="button"
+                className="btn-primary text-xs"
+                disabled={busy || !videoSourceAssetId}
+                onClick={() => void dressAsset(videoSourceAssetId)}
+              >
+                Dress model
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn-primary text-xs"
+              disabled={busy || !videoSourceAssetId || !videoMotion.trim()}
+              onClick={() => void createVideo(videoSourceAssetId)}
+            >
+              {lookbookSourceDressed
+                ? `Create ${videoDurationSec}s lookbook`
+                : `Create ${videoDurationSec}s 9:16 clip`}
+            </button>
+          </div>
+          {approvedStills.length === 0 && (
+            <p className="text-xs text-slate-500">Approve a still first, then make a video.</p>
+          )}
+        </div>
         {videos.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            Approve a still, then choose Create vertical video.
-          </p>
+          <p className="text-sm text-slate-500">No clips yet.</p>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {videos.map((video) => {
@@ -1309,7 +1592,16 @@ export default function CharacterStudio() {
                       <button
                         className="btn-ghost text-xs"
                         disabled={busy || !sourceId}
-                        onClick={() => sourceId && void createVideo(sourceId, motion)}
+                        onClick={() =>
+                          sourceId &&
+                          void createVideo(sourceId, {
+                            motion,
+                            productId:
+                              typeof video.meta?.product_id === "string"
+                                ? video.meta.product_id
+                                : videoProductId,
+                          })
+                        }
                       >
                         Regenerate
                       </button>
@@ -1329,7 +1621,14 @@ export default function CharacterStudio() {
                       </button>
                     </div>
                     <div className="text-[10px] capitalize text-slate-500">
-                      {video.decision} · {String(video.meta?.duration_seconds || "5")}s · silent
+                      {video.decision} ·{" "}
+                      {typeof video.meta?.duration_seconds === "number"
+                        ? video.meta.duration_seconds
+                        : videoDurationSec}
+                      s · silent
+                      {typeof video.meta?.product_name === "string"
+                        ? ` · ${video.meta.product_name}`
+                        : ""}
                     </div>
                   </div>
                 </article>
@@ -1799,16 +2098,26 @@ cd /home/pkeener/InstantImpact/apps/worker
                     🗑
                   </button>
                 </div>
-                {a.decision === "approved" && (
-                  <button
-                    type="button"
-                    className="btn-ghost w-full px-2 py-1 text-[10px] text-accent-soft"
-                    disabled={busy}
-                    onClick={() => void createVideo(a.id)}
-                  >
-                    Create vertical video
-                  </button>
-                )}
+                {a.decision === "approved" &&
+                  (videoProductIsGarment && !stillIsDressed(a, videoProductId) ? (
+                    <button
+                      type="button"
+                      className="btn-ghost w-full px-2 py-1 text-[10px] text-accent-soft"
+                      disabled={busy}
+                      onClick={() => void dressAsset(a.id)}
+                    >
+                      Dress model
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn-ghost w-full px-2 py-1 text-[10px] text-accent-soft"
+                      disabled={busy}
+                      onClick={() => void createVideo(a.id)}
+                    >
+                      Create {videoDurationSec}s video
+                    </button>
+                  ))}
                 <div className="text-center text-[10px] capitalize text-slate-400">{a.decision}</div>
               </div>
             </div>
@@ -1821,7 +2130,7 @@ cd /home/pkeener/InstantImpact/apps/worker
         <h2 className="font-display text-xl">Approved sets & export</h2>
         <p className="text-sm text-slate-400">
           Select approved stills above, create an immutable set (copied + hashed), then export a zip
-          with disclosure sidecars.
+          with disclosure sidecars and captions.md.
         </p>
         <div className="flex flex-wrap gap-2">
           <input
@@ -1939,6 +2248,30 @@ cd /home/pkeener/InstantImpact/apps/worker
                     </div>
                     <select
                       className="input"
+                      value={videoProductId}
+                      onChange={(e) => selectVideoProduct(e.target.value)}
+                    >
+                      <option value="">No extra product</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                          {isGarmentProduct(p) ? " · garment" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="input"
+                      value={videoDurationSec}
+                      onChange={(e) => setVideoDurationSec(Number(e.target.value))}
+                    >
+                      {VIDEO_DURATION_OPTIONS.map((option) => (
+                        <option key={option.seconds} value={option.seconds}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="input"
                       value={
                         VIDEO_MOTION_PRESETS.find((preset) => preset.prompt === videoMotion)?.id ||
                         "custom"
@@ -1957,17 +2290,34 @@ cd /home/pkeener/InstantImpact/apps/worker
                       ))}
                       <option value="custom">Custom</option>
                     </select>
+                    {videoProductIsGarment && (
+                      <input
+                        className="input"
+                        value={videoGarmentStyling}
+                        placeholder="fit/styling instructions"
+                        onChange={(e) => setVideoGarmentStyling(e.target.value)}
+                      />
+                    )}
                     <textarea
                       className="input min-h-20"
                       value={videoMotion}
                       onChange={(e) => setVideoMotion(e.target.value)}
                     />
+                    {videoProductIsGarment && !stillIsDressed(lbAsset, videoProductId) && (
+                      <button
+                        className="btn-primary text-xs"
+                        disabled={busy}
+                        onClick={() => void dressAsset(lbAsset.id)}
+                      >
+                        Dress model
+                      </button>
+                    )}
                     <button
                       className="btn-primary text-xs"
                       disabled={busy || !videoMotion.trim()}
                       onClick={() => void createVideo(lbAsset.id)}
                     >
-                      Create 5-second 9:16 clip
+                      Create {videoDurationSec}s 9:16 clip
                     </button>
                   </div>
                 )}

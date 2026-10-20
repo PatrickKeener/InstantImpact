@@ -14,6 +14,7 @@ from app.schemas.jobs import (
     AssetDecisionRequest,
     AssetDeleteResponse,
     AssetOut,
+    GarmentDressRequest,
     GpuStatusOut,
     IdentityLockRequest,
     JobOut,
@@ -21,6 +22,7 @@ from app.schemas.jobs import (
     SeedGalleryRequest,
     SeedImportResponse,
     StillBatchRequest,
+    ValidationSheetRequest,
     VideoGenerateRequest,
 )
 from app.services import approved as approved_svc
@@ -203,6 +205,50 @@ async def regenerate_asset(
 
 
 @router.post(
+    "/characters/{character_id}/assets/{asset_id}/dress",
+    response_model=JobOut,
+)
+async def dress_asset(
+    character_id: str,
+    asset_id: str,
+    background_tasks: BackgroundTasks,
+    payload: GarmentDressRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await svc.enqueue_garment_tryon(
+            db,
+            character_id,
+            asset_id,
+            payload,
+            background_tasks=background_tasks,
+        )
+    except svc.JobServiceError as e:
+        raise _err(e) from e
+
+
+@router.post(
+    "/characters/{character_id}/validation-sheet",
+    response_model=JobOut,
+)
+async def validation_sheet(
+    character_id: str,
+    background_tasks: BackgroundTasks,
+    payload: ValidationSheetRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await svc.enqueue_validation_sheet(
+            db,
+            character_id,
+            payload,
+            background_tasks=background_tasks,
+        )
+    except svc.JobServiceError as e:
+        raise _err(e) from e
+
+
+@router.post(
     "/characters/{character_id}/assets/{asset_id}/video",
     response_model=JobOut,
 )
@@ -224,6 +270,10 @@ async def create_asset_video(
             fps=payload.fps,
             steps=payload.steps,
             seed=payload.seed,
+            product_id=payload.product_id,
+            product_placement=payload.product_placement,
+            garment_styling=payload.garment_styling,
+            accessories=payload.accessories,
             background_tasks=background_tasks,
         )
     except svc.JobServiceError as e:

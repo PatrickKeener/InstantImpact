@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import random
 import uuid
 from datetime import datetime, timezone
@@ -13,6 +12,13 @@ from fastapi import BackgroundTasks
 from instantimpact_common.enums import CharacterStatus, JobItemStatus, JobStatus, JobType
 from instantimpact_common.safety import validate_for_enqueue
 from instantimpact_common.schemas import BriefItem, JobRequestSnapshot, StillUnitRequest
+from instantimpact_common.video import (
+    WAN_FRAMES_DEFAULT,
+    WAN_FPS_DEFAULT,
+    duration_seconds,
+    motion_for_item,
+    snap_wan_frames,
+)
 from instantimpact_prompts.render_flux import render_flux_prompts
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
@@ -22,7 +28,12 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.db.models import Asset, ContentBrief, Job, JobItem
-from app.schemas.jobs import SeedGalleryRequest, StillBatchRequest
+from app.schemas.jobs import (
+    GarmentDressRequest,
+    SeedGalleryRequest,
+    StillBatchRequest,
+    ValidationSheetRequest,
+)
 from app.services import characters as char_svc
 from app.services import identity as identity_svc
 from app.services.storage import get_layout, relative_to_data, write_json
@@ -163,6 +174,27 @@ async def _attach_products(db: AsyncSession, units: list[StillUnitRequest]) -> N
         u.garment = fields["garment"]
 
 
+def _units_need_garment_tryon(units: list[StillUnitRequest]) -> bool:
+    return any(
+        u.product_kind == "garment"
+        and u.product_placement == "wearing"
+        and not u.skip_garment_tryon
+        for u in units
+    )
+
+
+def _prepare_video_units(units: list[StillUnitRequest]) -> None:
+    for u in units:
+        u.video_frames = snap_wan_frames(u.video_frames)
+        u.video_fps = int(u.video_fps or WAN_FPS_DEFAULT)
+        u.video_motion = motion_for_item(
+            motion=u.video_motion,
+            product_kind=u.product_kind,
+            product_placement=u.product_placement,
+        )
+        u.extra_prompt = u.video_motion
+
+
 def _version_for_generation(c) -> Any:
     """Production stills use locked version when ready; else working version."""
     if c.status == CharacterStatus.READY and c.locked_version_id:
@@ -192,6 +224,8 @@ async def _enqueue(
         raise JobServiceError("Character has no version")
 
     await _attach_products(db, units)
+    if job_type == JobType.VIDEO_I2V:
+        _prepare_video_units(units)
 
     texts = []
     for u in units:
@@ -234,14 +268,17 @@ async def _enqueue(
     if not mock:
         from instantimpact_common.flux_inventory import (
             fail_closed_message,
-            find_model,
+            garment_require_pipeline,
             inspect_flux_still,
-            resolve_comfy_root,
+            inspect_garment_tryon,
+            inspect_wan_video,
             stills_require_pipeline,
+            video_require_pipeline,
         )
 
+        runtime = settings.flux_runtime()
         if stills_require_pipeline(job_type):
-            report = inspect_flux_still(settings.flux_runtime(), comfy_reachable=True)
+            report = inspect_flux_still(runtime, comfy_reachable=True)
             blocked = fail_closed_message(report)
             if blocked:
                 raise JobServiceError(blocked, 503)
@@ -260,81 +297,23 @@ async def _enqueue(
             if missing_lora:
                 raise JobServiceError(missing_lora, 503)
 
-        optional_required: list[tuple[str, str]] = []
-        if str(job_type) == str(JobType.VIDEO_I2V):
-            optional_required.extend(
-                [
-                    (
-                        "diffusion_models",
-                        os.environ.get(
-                            "INSTANTIMPACT_WAN_UNET",
-                            "wan2.2_ti2v_5B_fp16.safetensors",
-                        ),
-                    ),
-                    (
-                        "clip",
-                        os.environ.get(
-                            "INSTANTIMPACT_WAN_CLIP",
-                            "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
-                        ),
-                    ),
-                    (
-                        "vae",
-                        os.environ.get("INSTANTIMPACT_WAN_VAE", "wan2.2_vae.safetensors"),
-                    ),
-                ]
+        if video_require_pipeline(job_type):
+            report = inspect_wan_video(
+                runtime,
+                enabled=settings.enable_video,
+                comfy_reachable=True,
             )
-        if any(
-            u.product_kind == "garment" and u.product_placement == "wearing"
-            for u in units
+            blocked = fail_closed_message(report)
+            if blocked:
+                raise JobServiceError(blocked, 503)
+
+        if garment_require_pipeline(
+            job_type, units_need_tryon=_units_need_garment_tryon(units)
         ):
-            optional_required.extend(
-                [
-                    (
-                        "diffusion_models",
-                        os.environ.get(
-                            "INSTANTIMPACT_QWEN_EDIT_UNET",
-                            "qwen_image_edit_fp8_e4m3fn.safetensors",
-                        ),
-                    ),
-                    (
-                        "clip",
-                        os.environ.get(
-                            "INSTANTIMPACT_QWEN_EDIT_CLIP",
-                            "qwen_2.5_vl_7b_fp8_scaled.safetensors",
-                        ),
-                    ),
-                    (
-                        "vae",
-                        os.environ.get(
-                            "INSTANTIMPACT_QWEN_EDIT_VAE", "qwen_image_vae.safetensors"
-                        ),
-                    ),
-                    (
-                        "loras",
-                        os.environ.get(
-                            "INSTANTIMPACT_QWEN_EDIT_LORA",
-                            "Qwen-Image-Edit-Lightning-4steps-V1.0-bf16.safetensors",
-                        ),
-                    ),
-                ]
-            )
-        if optional_required:
-            comfy_root = resolve_comfy_root(settings.comfy_dir)
-            missing = [
-                name
-                for kind, name in optional_required
-                if find_model(comfy_root, kind, name) is None
-            ]
-            if missing:
-                profile = "video" if str(job_type) == str(JobType.VIDEO_I2V) else "garment"
-                raise JobServiceError(
-                    "Missing Comfy model files: "
-                    + ", ".join(missing)
-                    + f". Run: python scripts/bootstrap_models.py --profile {profile} "
-                    "--i-accept-licenses",
-                    503,
-                )
+            report = inspect_garment_tryon(runtime, comfy_reachable=True)
+            blocked = fail_closed_message(report)
+            if blocked:
+                raise JobServiceError(blocked, 503)
 
     # Assign seeds (keep any seed already set, e.g. regenerate), unless the
     # policy is "same" — that overwrites so a whole expand set shares one face.
@@ -744,13 +723,22 @@ async def enqueue_video_i2v(
     *,
     motion_prompt: str,
     negative_prompt: str | None = None,
-    frames: int = 81,
-    fps: int = 16,
+    frames: int = WAN_FRAMES_DEFAULT,
+    fps: int = WAN_FPS_DEFAULT,
     steps: int = 20,
     seed: int | None = None,
+    product_id: str | None = None,
+    product_placement: str | None = None,
+    garment_styling: str | None = None,
+    accessories: str | None = None,
     background_tasks: BackgroundTasks | None = None,
 ) -> dict:
-    """Animate one approved still into a short vertical marketing clip."""
+    """Animate one approved still into a vertical marketing clip.
+
+    A garment product dresses the source still (Qwen try-on) before Wan I2V so
+    the clip can show off the clothes. If no product is passed, a product on
+    the source still's metadata is inherited.
+    """
     q = await db.execute(select(Asset).where(Asset.id == asset_id))
     asset = q.scalar_one_or_none()
     if not asset or asset.character_id != character_id:
@@ -762,6 +750,22 @@ async def enqueue_video_i2v(
     source = get_layout().root / str(asset.path).replace("\\", "/")
     if not source.is_file():
         raise JobServiceError(f"Source still is missing on disk: {asset.path}", 400)
+
+    meta = asset.meta_json or {}
+    inherited_id = str(meta.get("product_id") or "").strip() or None
+    resolved_product_id = (product_id or "").strip() or inherited_id
+    resolved_placement = (
+        (product_placement or "").strip()
+        or str(meta.get("product_placement") or "").strip()
+        or None
+    )
+    resolved_styling = (garment_styling or "").strip() or meta.get("garment_styling")
+    resolved_accessories = (accessories or "").strip() or meta.get("accessories")
+    already_dressed = (
+        meta.get("product_conditioning") == "qwen_image_edit_tryon"
+        and bool(inherited_id)
+        and inherited_id == resolved_product_id
+    )
 
     unit = StillUnitRequest(
         item_index=0,
@@ -775,6 +779,11 @@ async def enqueue_video_i2v(
         video_frames=frames,
         video_fps=fps,
         video_steps=steps,
+        product_id=resolved_product_id,
+        product_placement=resolved_placement,
+        garment_styling=str(resolved_styling) if resolved_styling else None,
+        accessories=str(resolved_accessories) if resolved_accessories else None,
+        skip_garment_tryon=already_dressed,
     )
     job = await _enqueue(
         db,
@@ -784,7 +793,112 @@ async def enqueue_video_i2v(
         aspect_ratio="9:16",
         seed_policy="random",
         background_tasks=background_tasks,
-        extra_meta={"source_asset_id": asset.id, "output_kind": "video"},
+        extra_meta={
+            "source_asset_id": asset.id,
+            "output_kind": "video",
+            "lookbook": bool(resolved_product_id),
+        },
+    )
+    return job_to_out(job)
+
+
+async def enqueue_garment_tryon(
+    db: AsyncSession,
+    character_id: str,
+    asset_id: str,
+    payload: GarmentDressRequest,
+    background_tasks: BackgroundTasks | None = None,
+) -> dict:
+    """Dress an approved still with a garment via Qwen try-on. No Flux still pass."""
+    q = await db.execute(select(Asset).where(Asset.id == asset_id))
+    asset = q.scalar_one_or_none()
+    if not asset or asset.character_id != character_id:
+        raise JobServiceError("Source still not found", 404)
+    if asset.kind != "still":
+        raise JobServiceError("Garment try-on requires a still image")
+    if asset.decision != "approved":
+        raise JobServiceError("Approve the source still before dressing it", 409)
+    source = get_layout().root / str(asset.path).replace("\\", "/")
+    if not source.is_file():
+        raise JobServiceError(f"Source still is missing on disk: {asset.path}", 400)
+    product_id = (payload.product_id or "").strip()
+    if not product_id:
+        raise JobServiceError("product_id is required")
+    from app.services import products as product_svc
+
+    try:
+        product = await product_svc.get_product(db, product_id)
+    except product_svc.ProductServiceError as e:
+        raise JobServiceError(e.message, e.status_code) from e
+    kind = str((product.meta_json or {}).get("product_kind") or "product")
+    if kind != "garment":
+        raise JobServiceError("Dress requires a clothing / garment product")
+    placement = (payload.product_placement or "wearing").strip() or "wearing"
+    count = int(payload.count or 1)
+    units: list[StillUnitRequest] = []
+    for i in range(count):
+        units.append(
+            StillUnitRequest(
+                item_index=i,
+                seed=payload.seed if i == 0 else None,
+                theme="garment_tryon",
+                extra_prompt="wearing the uploaded garment",
+                source_asset_id=asset.id,
+                source_image_path=asset.path,
+                product_id=product_id,
+                product_placement=placement,
+                garment_styling=(payload.garment_styling or "").strip() or None,
+                accessories=(payload.accessories or "").strip() or None,
+                skip_garment_tryon=False,
+            )
+        )
+    job = await _enqueue(
+        db,
+        job_type=JobType.GARMENT_TRYON,
+        character_id=character_id,
+        units=units,
+        aspect_ratio="4:5",
+        seed_policy="random",
+        background_tasks=background_tasks,
+        extra_meta={
+            "source_asset_id": asset.id,
+            "output_kind": "still",
+            "dress": True,
+        },
+    )
+    return job_to_out(job)
+
+
+async def enqueue_validation_sheet(
+    db: AsyncSession,
+    character_id: str,
+    payload: ValidationSheetRequest | None = None,
+    background_tasks: BackgroundTasks | None = None,
+) -> dict:
+    """Six fixed-theme stills to check a registered character LoRA."""
+    from instantimpact_prompts.themes import VALIDATION_SHEET_SHOTS
+
+    body = payload or ValidationSheetRequest()
+    units = [
+        StillUnitRequest(
+            item_index=i,
+            seed=int(body.seed) + i if body.seed is not None else None,
+            theme=theme,
+            pose_hint=pose,
+            extra_prompt="validation sheet, locked character LoRA, consistent identity",
+            aspect_ratio=body.aspect_ratio,
+        )
+        for i, (theme, pose) in enumerate(VALIDATION_SHEET_SHOTS)
+    ]
+    job = await _enqueue(
+        db,
+        job_type=JobType.VALIDATION_SHEET,
+        character_id=character_id,
+        units=units,
+        aspect_ratio=body.aspect_ratio,
+        seed_policy="fixed_base" if body.seed is not None else "random",
+        background_tasks=background_tasks,
+        extra_meta={"validation_sheet": True, "shots": len(units)},
     )
     return job_to_out(job)
 
@@ -1430,6 +1544,81 @@ async def run_mock_job(db: AsyncSession, job_id: str) -> None:
     snapshot = job.request_json or {}
     character_id = job.character_id or ""
     version_id = job.character_version_id or ""
+    if job.type == JobType.GARMENT_TRYON:
+        from instantimpact_common.product_media import (
+            paste_product_corner,
+            product_meta_from_item,
+            resolve_product_image,
+            shot_meta_from_item,
+        )
+
+        out_dir = layout.output_stills_dir(character_id, job_id)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        items = sorted(job.items, key=lambda x: x.item_index)
+        for item in items:
+            req = item.request_json or {}
+            seed = req.get("seed") or random.randint(1, 10**9)
+            source = layout.root / str(req.get("source_image_path") or "").replace("\\", "/")
+            if source.is_file():
+                img = Image.open(source).convert("RGB")
+            else:
+                img = Image.new("RGB", (768, 960), color=(36, 36, 48))
+                draw = ImageDraw.Draw(img)
+                draw.text((24, 24), f"MOCK TRY-ON #{item.item_index}", fill=(220, 220, 230))
+            pref = resolve_product_image(layout.root, req)
+            if pref is not None:
+                try:
+                    img = paste_product_corner(img, pref)
+                except Exception:
+                    pass
+            filename = f"still_{item.item_index:03d}_s{seed}.png"
+            path = out_dir / filename
+            img.save(path, "PNG")
+            thumb = out_dir / f"thumb_{item.item_index:03d}.png"
+            tw, th = img.size
+            thumb_h = max(1, int(192 * th / max(tw, 1)))
+            img.resize((192, thumb_h)).save(thumb, "PNG")
+            disclosure = {
+                "synthetic": True,
+                "ai_generated": True,
+                "age_appearance": "21+",
+                "disclosure": SYNTHETIC_DISCLOSURE_DEFAULT,
+                "job_id": job_id,
+                "seed": seed,
+                "pipeline": "mock_tryon",
+                "source_asset_id": req.get("source_asset_id"),
+                **shot_meta_from_item(req),
+                **product_meta_from_item(req),
+            }
+            write_json(path.with_suffix(".disclosure.json"), disclosure)
+            asset_id = str(uuid.uuid4())
+            db.add(
+                Asset(
+                    id=asset_id,
+                    character_id=character_id,
+                    character_version_id=version_id,
+                    job_id=job_id,
+                    job_item_id=item.id,
+                    kind="still",
+                    path=relative_to_data(path),
+                    thumb_path=relative_to_data(thumb),
+                    sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                    width=img.size[0],
+                    height=img.size[1],
+                    seed=seed,
+                    prompt_positive=req.get("extra_prompt"),
+                    prompt_negative=None,
+                    pipeline="mock_tryon",
+                    meta_json=disclosure,
+                    decision="pending",
+                )
+            )
+            item.status = JobItemStatus.DONE
+            item.asset_id = asset_id
+        job.status = JobStatus.COMPLETED
+        job.finished_at = datetime.now(timezone.utc)
+        await db.commit()
+        return
     if job.type == JobType.VIDEO_I2V:
         item = sorted(job.items, key=lambda x: x.item_index)[0]
         req = item.request_json or {}
@@ -1445,8 +1634,22 @@ async def run_mock_job(db: AsyncSession, job_id: str) -> None:
             poster.write_bytes(b"")
         video = out_dir / "video_000.mp4"
         video.write_bytes(b"INSTANTIMPACT_MOCK_VIDEO")
-        frames = int(req.get("video_frames") or 81)
-        fps = int(req.get("video_fps") or 16)
+        frames = snap_wan_frames(req.get("video_frames") or WAN_FRAMES_DEFAULT)
+        fps = int(req.get("video_fps") or WAN_FPS_DEFAULT)
+        from instantimpact_common.product_media import product_meta_from_item
+
+        product_meta = product_meta_from_item(req)
+        if product_meta.get("product_ref_path"):
+            from instantimpact_common.product_media import paste_product_corner, resolve_product_image
+
+            pref = resolve_product_image(layout.root, req)
+            if pref is not None and poster.is_file() and poster.stat().st_size:
+                try:
+                    img = Image.open(poster).convert("RGB")
+                    img = paste_product_corner(img, pref)
+                    img.save(poster, "PNG")
+                except Exception:
+                    pass
         meta = {
             "synthetic": True,
             "ai_generated": True,
@@ -1455,9 +1658,11 @@ async def run_mock_job(db: AsyncSession, job_id: str) -> None:
             "motion_prompt": req.get("video_motion"),
             "frames": frames,
             "fps": fps,
-            "duration_seconds": round(frames / fps, 2),
+            "duration_seconds": duration_seconds(frames, fps),
             "pipeline": "mock_video",
             "silent": True,
+            "lookbook": bool(req.get("product_id")),
+            **product_meta,
         }
         write_json(video.with_suffix(".mp4.disclosure.json"), meta)
         asset_id = str(uuid.uuid4())

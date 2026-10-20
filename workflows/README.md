@@ -61,5 +61,9 @@ replaces the base still with the edited result. Install with
 
 Wan 2.2 TI2V-5B image-to-video workflow derived from Comfy-Org's official
 template. It creates silent 480×832 vertical clips from approved stills and
-saves them through core `CreateVideo`/`SaveVideo` nodes. Install with
+saves them through core `CreateVideo`/`SaveVideo` nodes. Default length is
+121 frames at 16 fps (~8s); 81 (~5s) and 161 (~10s) are valid 4n+1 options.
+Studio dresses via `POST .../assets/{id}/dress` (Qwen only, no Flux), then
+animates an approved dressed still. A garment product on an undressed still
+still runs `qwen_garment_tryon_v1` before this graph. Install with
 `scripts/bootstrap_models.py --profile video`.

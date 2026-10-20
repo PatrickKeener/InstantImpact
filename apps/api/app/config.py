@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     enable_video: bool = False
     enable_captions: bool = False
     enable_external_refs: bool = False
+    ollama_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "llama3.1"
     # Product packaging/product shots for ads — separate from character face refs.
     enable_product_uploads: bool = True
 

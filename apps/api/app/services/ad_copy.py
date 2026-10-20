@@ -102,12 +102,61 @@ async def generate_ad_copy(db: AsyncSession, character_id: str, payload: AdCopyR
         seed=payload.seed,
     )
 
+    from app.config import get_settings
+
+    settings = get_settings()
+    if settings.enable_captions:
+        from app.services.ollama_captions import rewrite_ad_copy
+
+        rewritten = await rewrite_ad_copy(
+            result, url=settings.ollama_url, model=settings.ollama_model
+        )
+        if rewritten:
+            result["primary"] = rewritten["primary"]
+            result["short"] = rewritten["short"]
+            result["cta"] = rewritten["cta"]
+            if rewritten.get("variants"):
+                result["variants"] = rewritten["variants"]
+            result["engine"] = "ollama"
+        else:
+            result["caption_fallback"] = "ollama_unavailable"
+
     texts = [result["primary"], result["short"], result["cta"]]
     texts.extend(v["caption"] for v in result["variants"])
+    scanned = []
+    blocked = False
     for t in texts:
         scan = scan_text(t)
         if not scan.ok:
-            raise AdCopyServiceError("; ".join(scan.reasons))
+            blocked = True
+            scanned.extend(scan.reasons)
+    if blocked and result.get("engine") == "ollama":
+        # Safety-blocked Ollama text: keep the template copy.
+        result = render_ad_copy(
+            character_name=c.display_name,
+            personality=version.personality_json or {},
+            speaking_style=version.speaking_style_json or {},
+            marketing_voice=version.marketing_voice_json or {},
+            product_name=product_name,
+            product_brand=product_brand,
+            product_description=product_description,
+            product_placement=product_placement,
+            theme=theme,
+            count=payload.count,
+            seed=payload.seed,
+        )
+        result["caption_fallback"] = "ollama_safety"
+        blocked = False
+        scanned = []
+        texts = [result["primary"], result["short"], result["cta"]]
+        texts.extend(v["caption"] for v in result["variants"])
+        for t in texts:
+            scan = scan_text(t)
+            if not scan.ok:
+                blocked = True
+                scanned.extend(scan.reasons)
+    if blocked:
+        raise AdCopyServiceError("; ".join(scanned))
 
     result["product_id"] = product_id
     result["product_ref_path"] = product_ref_path

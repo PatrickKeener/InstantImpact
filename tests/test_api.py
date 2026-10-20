@@ -131,6 +131,8 @@ def test_approved_still_can_enqueue_vertical_video(client: TestClient):
     assert len(clips) == 1
     assert clips[0]["meta"]["source_asset_id"] == asset_id
     assert clips[0]["meta"]["silent"] is True
+    assert clips[0]["meta"]["frames"] == 121
+    assert clips[0]["meta"]["duration_seconds"] == 7.56
 
 
 def test_health(client: TestClient):
@@ -141,6 +143,9 @@ def test_health(client: TestClient):
     assert "redis_ok" in body
     assert body["mvp"]["mock_generation"] is True
     assert body["pipelines"]["flux_still"] == "mock"
+    assert body["pipelines"]["garment_tryon"] == "mock"
+    assert body["pipelines"]["wan_video"] == "mock"
+    assert body["captions"]["engine"] == "template_v1"
 
 
 def test_seed_gallery_fails_closed_when_split_weights_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -362,6 +367,12 @@ def test_character_still_approve_dataset_lock(client: TestClient):
     )
     assert exp.status_code == 200, exp.text
     assert exp.json()["export_path"]
+    import zipfile
+
+    root = Path(client.get("/api/system/health").json()["data_dir"])
+    zip_path = root / exp.json()["export_path"]
+    names = zipfile.ZipFile(zip_path).namelist()
+    assert "captions.md" in names
 
 
 def _wait_job(client: TestClient, job_id: str, timeout: float = 4.0) -> dict:
